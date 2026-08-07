@@ -1,0 +1,550 @@
+Precursor,Sintering_Time_Hours,Atmosphere,Solvent,Discharge_Capacity_mAh_g
+Li2S,24.0,Ar,DME,200.0
+Sodium Citrate,1.0,Air,Deionized Water,200.0
+LiFePO4,0.25,Air,Deionized Water,200.0
+GO,0.0,Ar,Ethylene Glycol,200.0
+LiFSI,12.0,Ar,acetone,200.0
+BWBYs,0.33,N2,Deionized Water,197.0
+Li2CO3,6.0,N2,Deionized Water,197.0
+oxidized CNT[38],1.0,Ar,Deionized Water,196.0
+HNO3,0.75,Ar,Deionized Water,195.0
+Fe,2.0,Reducing (H2),Deionized Water,192.0
+tBHMA,24.0,Air,THF,190.0
+LiClO4,24.0,Ar,acetonitrile,190.0
+CL,6.0,Ar,THF,190.0
+sugarcane bagasse,0.08,N2,acetone,190.0
+L-Ascorbic acid,1.0,Air,Deionized Water,189.1
+amorphous SiO2 powder,5.0,Ar,Deionized Water,185.0
+LiH2PO4,10.0,Ar,acetone,185.0
+Ti(C4H9O)4,10.0,Ar,Deionized Water,185.0
+amorphous iron phosphate,0.5,N2,Ethylene Glycol,185.0
+C6H12O6.6H2O,12.0,Air,Deionized Water,185.0
+NH4H2PO4,15.0,Reducing (H2),Deionized Water,184.0
+Li2CO3,4.0,Air,Ethanol,184.0
+CA,24.0,Ar,DMF,178.0
+CH3COOLi,4.0,N2,Deionized Water,177.0
+citric acid,4.0,N2,Deionized Water,177.0
+V2O5,2.0,Ar,DMF,176.0
+NH4H2PO4,8.0,Reducing (H2),Deionized Water,175.8
+CMC,3.0,Reducing (H2),Deionized Water,175.0
+bulk Sb,1.0,Ar,NMP,175.0
+FeSO4,5.0,N2,Deionized Water,175.0
+lactose,2.0,Ar,acetone,175.0
+Li2CO3,24.0,N2,acetone,175.0
+DABCO,0.0,N2,Deionized Water,175.0
+PAN,12.0,Vacuum,DMF,175.0
+H3PO4,6.0,Ar,Deionized Water,174.0
+Li2CO3,0.08,Ar,acetone,174.0
+citric acid,24.0,N2,Deionized Water,174.0
+KH2PO4,0.5,Air,Ethylene Glycol,173.8
+Li2CO3,6.0,Air,acetone,172.0
+CP,2.0,N2,Deionized Water,171.0
+H3PO4,5.0,Ar,Deionized Water,171.0
+Li2CO3,24.0,Air,Deionized Water,171.0
+LiH2PO4,8.0,Reducing (H2),Deionized Water,171.0
+FeC2O4,10.0,N2,Ethanol,171.0
+CTAB,0.5,Reducing (H2),Ethanol,171.0
+LiMnPO4,1.0,Ar,Deionized Water,171.0
+DMAP,48.0,Air,DMF,170.7
+LiTFSI,48.0,Vacuum,NMP,170.7
+IB,12.0,Air,THF,170.7
+VEC,3.0,N2,toluene,170.7
+DCC,48.0,Air,DMF,170.7
+BA,2.0,Ar,EMC,170.6
+HCS,2.0,Ar,concentrated nitric acid,170.1
+formaldehyde,0.33,Ar,Ethanol,170.1
+triethylamine,3.0,Reducing (H2),Deionized Water,170.0
+LiTFSI,12.0,Vacuum,Ethanol,170.0
+CNT powders,0.17,N2,Deionized Water,170.0
+Fe(NO3)3.9H2O,2.0,Reducing (H2),Deionized Water,170.0
+GMA,0.5,N2,Deionized Water,170.0
+SBA-15,1.0,Air,Deionized Water,170.0
+GO,3.0,Reducing (H2),Deionized Water,170.0
+DMSO,2.0,Air,DMSO,170.0
+AIBA,11.0,N2,Deionized Water,170.0
+glucose,4.0,N2,Ethanol,170.0
+AIBN,1.0,N2,Acetonitrile,170.0
+P2O5,0.25,Reducing (H2),Ethanol,170.0
+AA,1.0,Reducing (H2),Deionized Water,170.0
+H3PO4,0.17,Ar,Ethylene Glycol,170.0
+FePO4,1.0,Other,Deionized Water,170.0
+TEOS,4.0,Reducing (H2),Deionized Water,170.0
+neat SOCl2,0.5,Ar,DMF,170.0
+H3PO4,0.5,Air,Ethylene Glycol,170.0
+P2O5,3.0,Reducing (H2),Ethanol,170.0
+chloroethyl ethyl ether,48.0,N2,ether,170.0
+MWCNTs,5.0,N2,Deionized Water,170.0
+Fe2O3,5.0,Air,Ethanol,170.0
+FeC2O4.2H20,2.0,Ar,NMP,170.0
+Li2CO3,0.5,Ar,alcohol,170.0
+Fe3(PO4)2 and Li3PO4,0.25,N2,Deionized Water,170.0
+TEOS,20.0,Air,Deionized Water,170.0
+LiOH,1.0,N2,Deionized Water,170.0
+LiH2PO4,1.0,N2,DMF,170.0
+CuO,0.5,Reducing (H2),Ethanol,170.0
+CH3COOLi,0.17,N2,Deionized Water,170.0
+oxalic acid,1.0,Reducing (H2),Deionized Water,170.0
+LiH2PO4,18.0,Reducing (H2),acetone,170.0
+NH4F,5.0,Ar,Deionized Water,170.0
+LiOH,9.0,Reducing (H2),Deionized Water,170.0
+TSC,0.33,Reducing (H2),Ethanol,170.0
+Li2CO3,3.0,N2,Ethanol,170.0
+dopamine hydrochloride,1.0,Ar,Deionized Water,170.0
+H2O2,0.17,Ar,Deionized Water,170.0
+Li2CO3,10.0,Ar,Deionized Water,170.0
+glucose,1.0,N2,Deionized Water,170.0
+LMP,4.0,Ar,Ethylene Glycol,170.0
+FeSO4.7H2O,6.0,Ar,Ethylene Glycol,170.0
+LiClO4,5.0,Ar,Acetonitrile,170.0
+PEO,0.25,N2,DCM,170.0
+graphite oxide,1.0,Reducing (H2),Deionized Water,170.0
+H3PO4,0.5,Ar,Deionized Water,170.0
+LiH2PO4,24.0,Reducing (H2),Ethanol,170.0
+Li2CO3,12.0,N2,Deionized Water,170.0
+sodium hydride,1.0,Reducing (H2),tetrahydrofurane,170.0
+NH4H2PO4,3.0,Air,Deionized Water,170.0
+MWCNTs,5.0,N2,Deionized Water,170.0
+Li,2.0,N2,Ethanol,170.0
+CTAB,0.5,N2,Deionized Water,170.0
+sucrose,0.33,N2,Deionized Water,170.0
+iron,4.0,Air,polyol,170.0
+LiNO3,1.0,Reducing (H2),Deionized Water,170.0
+LiFePO4,0.0,Air,Deionized Water,170.0
+sucrose,2.0,N2,Deionized Water,170.0
+LiOH,0.5,Ar,isooctyl alcohol,170.0
+FeSO4,1.0,N2,Deionized Water,170.0
+graphene,0.02,Other,Ethylene Glycol,170.0
+sucrose,2.0,Ar,Deionized Water,170.0
+Li2CO3,8.0,Reducing (H2),acetone,170.0
+Li2CO3,12.0,Vacuum,Ethanol,170.0
+LiTFSI,0.5,Air,Ethylene Glycol,170.0
+NH4H2PO4,48.0,Reducing (H2),acetone,170.0
+C6H8O6,10.0,Vacuum,Deionized Water,170.0
+VC,5.0,Reducing (H2),alcohol,170.0
+LiCoO2,2.0,N2,Deionized Water,170.0
+H3PO4,5.0,N2,Deionized Water,170.0
+sucrose,24.0,Ar,Deionized Water,170.0
+lithium acetylacetonate,1.0,Ar,Ethanol,170.0
+MWCNT,0.5,Ar,acetone,170.0
+Li2C2O4,6.0,N2,Deionized Water,170.0
+GO,0.5,Reducing (H2),Deionized Water,170.0
+K2CO3,2.0,Ar,Deionized Water,170.0
+Li2CO3,12.0,N2,Deionized Water,170.0
+Li2CO3,1.0,Ar,acetone,170.0
+LSC,0.33,N2,Ethanol,170.0
+H3PO4,0.17,Reducing (H2),Ethylene Glycol,170.0
+H2O2,0.5,Other,Deionized Water,170.0
+sucrose,3.0,Ar,Deionized Water,170.0
+Li2CO3,0.0,Ar,Deionized Water,170.0
+LiOH,0.5,N2,Deionized Water,170.0
+PVA,10.0,Vacuum,Deionized Water,170.0
+LiNO3,12.0,Ar,Deionized Water,170.0
+Fe2O3,3.0,N2,acetone,170.0
+FeC2O4,8.0,N2,Ethanol,170.0
+Li2SO4,0.5,Reducing (H2),Ethylene Glycol,170.0
+NH4H2PO4,0.5,Reducing (H2),Deionized Water,170.0
+Li2CO3,10.0,Air,Ethanol,170.0
+Li2CO3,6.0,Ar,Deionized Water,170.0
+LiTFSI,24.0,Other,acetone,170.0
+CTAB,1.0,Vacuum,Isopropanol,170.0
+FeSO4 · 7H2O,15.0,N2,Deionized Water,170.0
+ordered mesoporous carbon,0.5,Reducing (H2),Deionized Water,170.0
+ferrous oxalate dihydrate FeC2O42H2O,10.0,N2,Ethanol,170.0
+bromine,2.0,N2,acetonitrile,170.0
+LiH2PO4,4.0,Ar,Deionized Water,170.0
+citric acid,12.0,Air,Ethanol,170.0
+LiFePO4,4.0,N2,Ethanol,170.0
+FePO4 · 2H2O,2.5,Air,Ethanol,170.0
+NH4H2PO4,3.0,Ar,acetone,170.0
+Li2CO3,3.0,Reducing (H2),acetone,170.0
+citric acid,24.0,Ar,Deionized Water,170.0
+NH4H2PO4,10.0,Ar,Deionized Water,170.0
+Fe,6.0,N2,Ethanol,170.0
+Ti(C3H7O)4,0.5,Reducing (H2),Ethanol,170.0
+ferrous oxalate,24.0,Reducing (H2),Ethylene Glycol,170.0
+Fe2O3,4.0,Air,ethyl alcohol,170.0
+Li2CO3,24.0,Air,NMP,170.0
+Li,8.0,Ar,Deionized Water,170.0
+FeSO4 · 7H2O,0.08,Reducing (H2),Deionized Water,170.0
+CTAB,1.0,Ar,Deionized Water,170.0
+iron acetate,12.0,N2,Ethylene Glycol,170.0
+Li2CO3(AR),12.0,Ar,absolute ethyl alcohol,170.0
+NH4H2PO4,0.5,Reducing (H2),alcohol,170.0
+solid Li3PO4,1.0,Reducing (H2),Isopropanol,170.0
+iron nitrate,6.0,Ar,Deionized Water,170.0
+FeC2O4,20.0,Ar,Ethylene Glycol,170.0
+NH4H2PO4,8.0,Ar,Ethanol,170.0
+LiNO3,6.0,Reducing (H2),polypropylene glycol,170.0
+Li2CO3,12.0,Ar,acetone,170.0
+Super-P carbon,0.33,Ar,acetone,170.0
+NH4H2PO4,6.0,Ar,Deionized Water,170.0
+NaH2PO4,2.0,Air,Deionized Water,170.0
+H3PO4,0.5,N2,Ethylene Glycol,170.0
+FeC2O4,10.0,N2,Deionized Water,170.0
+FeC2O4 ⋅ 2H2O,48.0,Ar,Ethylene Glycol,170.0
+H3PO4,0.25,Ar,Deionized Water,170.0
+C3H8O2:H2O,0.25,Ar,Deionized Water,170.0
+H3PO4,1.0,Reducing (H2),oleylamine,170.0
+Li2CO3,2.0,Ar,Deionized Water,170.0
+Li2CO3,4.0,Ar/N2,Deionized Water,170.0
+FeCl3,2.0,Reducing (H2),Deionized Water,170.0
+NH4H2PO4,19.0,Reducing (H2),Deionized Water,170.0
+Li2CO3,24.0,Air,Deionized Water,170.0
+ZnO,0.5,Reducing (H2),Ethanol,170.0
+Fe(NO3)3.9H2O,10.0,N2,glycolic acid,170.0
+Fe(CH3COO)2,72.0,N2,Ethylene Glycol,170.0
+H3PO4,2.0,N2,Deionized Water,170.0
+H3PO4,10.0,Reducing (H2),Deionized Water,170.0
+H3PO4,10.0,Ar,Ethylene Glycol,170.0
+H3PO4,0.25,Air,Deionized Water,170.0
+Li2CO3,10.0,N2,Ethanol,170.0
+glucose,0.07,Reducing (H2),acetone,170.0
+Li2CO3,7.0,N2,Deionized Water,170.0
+H3PO4,6.0,N2,Deionized Water,170.0
+PANI,0.17,N2,Ethanol,170.0
+FeSO4 hydrate,24.0,Ar,Ethanol,170.0
+LiOH,1.0,Ar,Deionized Water,170.0
+iron nitrate,2.0,Vacuum,Deionized Water,170.0
+sucrose,15.0,Reducing (H2),Deionized Water,170.0
+NH4H2PO4,4.0,Other,Deionized Water,170.0
+Li2CO3,0.08,Ar,Deionized Water,170.0
+NH4Cl,12.0,Air,Ethanol,170.0
+Cu(CH3COO)2,0.33,N2,Deionized Water,170.0
+CeO2,5.0,Ar,Deionized Water,170.0
+lauric acid,6.0,N2,acetone,170.0
+GS,0.5,N2,Ethylene Glycol,170.0
+LiNO3,12.0,Reducing (H2),Deionized Water,170.0
+CBSI,24.0,Ar,NMP,170.0
+sucrose,2.5,N2,Deionized Water,170.0
+DMF,24.0,Air,DMF,170.0
+citrate,12.0,Ar,Deionized Water,170.0
+resol,1.0,Ar,concentrated hydrochloric acid,170.0
+CH3COOLi,24.0,N2,Deionized Water,170.0
+NH4H2PO4,12.0,Reducing (H2),Deionized Water,170.0
+NO2BF4,10.0,Ar,acetonitrile,170.0
+Sr(NO3)2,2.0,Air,Deionized Water,170.0
+lithium hydrogenophosphate Li2HPO4,0.01,Ar,Deionized Water,170.0
+lithium phosphate,12.0,N2,Deionized Water,170.0
+Li2CO3,10.0,Ar,acetonitrile,170.0
+pre-milled Li2CO3,24.0,N2,Ethanol,170.0
+LiH2PO4,6.0,Ar,Ethanol,170.0
+NH3H2PO4,12.0,Ar,Ethanol,170.0
+GO,1.0,Reducing (H2),Deionized Water,170.0
+LSM,1.0,Reducing (H2),Ethanol,170.0
+zirconium balls,12.0,Ar,Deionized Water,170.0
+Li2CO3,7.0,Ar,Deionized Water,170.0
+GO,1.0,Reducing (H2),Ethylene Glycol,170.0
+Li2CO3,10.0,Ar,acetone,170.0
+Li2CO3,0.25,Ar,acetone,170.0
+brij 78,0.08,Ar,brij 78,170.0
+graphene power,10.0,Air,Ethylene Glycol,170.0
+ferric oxide,2.0,N2,acetone,170.0
+glucose,6.0,Ar,Deionized Water,170.0
+crystal sugar,0.25,N2,acetone,170.0
+PS colloids,24.0,N2,Deionized Water,170.0
+Fe(COOCH3)2,20.0,Air,DMF,170.0
+Fe(CO2CH3)2,24.0,Ar,Ethylene Glycol,170.0
+Li2CO3,6.0,Ar,Ethanol,170.0
+Li2CO3,24.0,Reducing (H2),Ethanol,170.0
+FeC6H5O7,48.0,Reducing (H2),Deionized Water,170.0
+LiNO3,0.25,N2,Deionized Water,170.0
+Li2CO3,8.0,Air,Ethanol,170.0
+H3PO4,0.17,Ar,Deionized Water,170.0
+H3PO4,0.5,N2,Ethanol,170.0
+anhydrous FePO4,4.0,N2,HCl,170.0
+Li2CO3,4.0,N2,Ethanol,170.0
+GO,0.5,Reducing (H2),Deionized Water,170.0
+P2O5,6.0,Other,concentrated sulfuric acid,170.0
+Er(CH3COO)3,9.0,Air,Deionized Water,170.0
+NH4H2PO4,2.0,Reducing (H2),Deionized Water,170.0
+DMSO,2.0,Vacuum,DMSO,170.0
+NaBC24H20,1.0,N2,Deionized Water,170.0
+Li2CO3,6.0,N2,Ethanol,170.0
+acetylene black,7.0,Ar,Deionized Water,170.0
+CoCO3,2.0,N2,Deionized Water,170.0
+GO,2.0,Ar,Deionized Water,170.0
+Si,2.0,Other,CMC,170.0
+H3PO4,5.0,Reducing (H2),Ethanol,170.0
+H2SO4,6.0,N2,Deionized Water,170.0
+LATP powder,1.0,Air,Deionized Water,170.0
+Li3PO4,4.0,Ar,Ethanol,170.0
+graphite powder,1.0,N2,Deionized Water,170.0
+dopamine,0.25,Ar,Deionized Water,170.0
+H3PO4,2.0,Ar,Deionized Water,170.0
+sucrose,7.0,Ar,Deionized Water,170.0
+Li2CO3,18.0,Ar,CHCl3,170.0
+Fe2O3,15.0,Air,ethyl alcohol,170.0
+Li2CO3,12.0,Air,acetone,170.0
+NH4H2PO4,12.0,Vacuum,acetone,170.0
+H3PO4,0.17,Ar,Deionized Water,170.0
+ATMP,2.0,N2,Deionized Water,170.0
+H3PO4,6.0,N2,Isopropanol,170.0
+carbon black,2.0,Ar,Deionized Water,170.0
+anhydrous FeCl2,2.0,Ar,anhydrous n-methylimidazole,170.0
+Li2CO3,20.0,Ar,acetone,170.0
+LiH2PO4,0.0,Ar,Ethanol,170.0
+sucrose,2.0,Ar,Deionized Water,170.0
+glucose,2.0,Air,Ethylene Glycol,170.0
+FeSO4.7 H2O,0.33,Ar,Ethylene Glycol,170.0
+LiOH,1.0,Ar,Deionized Water,170.0
+FeSO4,0.17,N2,Deionized Water,170.0
+FeSO4,2.0,N2,Deionized Water,170.0
+EDTMPA,0.5,Ar,Deionized Water,170.0
+LiTFSI,24.0,Vacuum,acetonitrile,170.0
+Li foil,24.0,Ar,THF,170.0
+H3PO4,12.0,Reducing (H2),Ethanol,170.0
+electrolytic MnO2,0.5,Ar,Deionized Water,170.0
+PTMO,5.0,N2,Ethylene Glycol,170.0
+FeCl2,24.0,Ar,NMI,170.0
+FePO4,0.5,N2,Deionized Water,170.0
+FeC2O4,3.0,N2,Deionized Water,170.0
+H3PO4,0.5,N2,Ethylene Glycol,170.0
+starch,2.5,N2,Deionized Water,170.0
+NH4H2PO4,0.5,Reducing (H2),Deionized Water,170.0
+NH4H2PO4,3.0,Ar,Deionized Water,170.0
+stearic acid,6.0,N2,Ethanol,170.0
+FeC2O4 2H2O,8.0,Ar,Ethanol,170.0
+H3PO4,0.5,Reducing (H2),Deionized Water,170.0
+starch,1.0,N2,Deionized Water,170.0
+GO,7.0,Reducing (H2),Deionized Water,170.0
+GO,1.0,Ar,Deionized Water,170.0
+FeC2O4,24.0,Air,acetone,170.0
+iron powder,10.0,N2,Deionized Water,170.0
+iron phosphate,4.0,Reducing (H2),Ethanol,170.0
+NH4H2PO4,7.0,Air,Deionized Water,170.0
+NH4H2PO4,6.0,Ar,Deionized Water,170.0
+PAS,4.0,N2,Ethanol,170.0
+Li2CO3,24.0,N2,Ethanol,170.0
+FePO4,2.0,N2,Deionized Water,170.0
+Li2CO3,24.0,N2,Ethanol,170.0
+H3PO4,0.25,Reducing (H2),Deionized Water,170.0
+Fe (NO3)3.9H2O,0.25,N2,Deionized Water,170.0
+CTAB,0.02,N2,Deionized Water,170.0
+CTAB,0.5,Reducing (H2),Deionized Water,170.0
+ferrous manganese oxalate dihydrate,4.0,N2,Deionized Water,170.0
+H3PO4,0.08,Ar,Deionized Water,170.0
+CH3COOLi.2H2O,10.0,Ar,Deionized Water,170.0
+H3PO4,1.0,Vacuum,Ethylene Glycol,170.0
+FeC2O4.2H2O,6.0,Reducing (H2),acetone,170.0
+FeSO4,0.5,Reducing (H2),Deionized Water,170.0
+C6H6O2,0.5,N2,Deionized Water,170.0
+sodium diphenylaminesulfonate,4.0,N2,condensed hydrochloride acid,170.0
+In2O3,4.0,Ar,concentrated nitric acid,170.0
+LiNO3,0.0,Air,Deionized Water,170.0
+LiF,6.0,Reducing (H2),acetone,170.0
+Fe2O3,6.0,N2,alcohol,170.0
+H2O,7.0,Reducing (H2),acetone,170.0
+glucose,12.0,Ar,Deionized Water,170.0
+LiOH,24.0,N2,Deionized Water,169.4
+MWCNTs,3.0,Ar,cyclohexanone,168.0
+LiH2PO4,0.5,Reducing (H2),Ethylene Glycol,168.0
+Fe oxalate,4.0,Ar,Ethanol,167.5
+LiNO3,0.25,Ar,DMF,167.2
+LiTFSI,24.0,Vacuum,anhydrous acetonitrile,167.2
+ascorbic acid,10.0,Ar,absolute ethyl alcohol,167.2
+Li2CO3,10.0,Ar,acetone,167.0
+H3PO4,0.25,N2,Deionized Water,167.0
+LiCoPO4,10.0,Air,Ethanol,167.0
+PS spheres,5.0,Ar,Deionized Water,167.0
+H3PO3,6.0,N2,Deionized Water,166.8
+CTAB,12.0,Ar,Deionized Water,166.0
+lithium propanesulfonyl(trifluoromethylsulfonyl)imide,0.25,Ar,anhydrous acetonitrile,166.0
+LiF,24.0,Ar,Deionized Water,165.6
+Li2CO3,6.0,Reducing (H2),Ethanol,165.2
+Li2CO3,2.0,N2,Ethanol,165.0
+FeSO4,10.0,N2,Deionized Water,165.0
+FeSO4,6.0,Reducing (H2),Deionized Water,165.0
+LiBOB,10.0,Ar,EC,165.0
+NH4H2PO4,6.0,Air,Deionized Water,165.0
+NaOH,2.0,Air,Deionized Water,165.0
+CMC,1.0,Air,Deionized Water,165.0
+Li2CO3,5.0,Ar,Deionized Water,164.4
+LiTFSI,12.0,Ar,acetonitrile,164.1
+LATP ceramic powder,12.0,Ar,DMF,164.0
+LiH2PO4,18.0,Ar,Ethylene Glycol,164.0
+FeSO4,0.5,Reducing (H2),Ethylene Glycol,164.0
+Li2CO3,4.0,N2,Deionized Water,163.9
+graphene,0.5,N2,alcohol,163.7
+EG,6.0,N2,Ethylene Glycol,163.6
+NH4H2PO4,0.25,Reducing (H2),Deionized Water,163.5
+NH4H2PO4,6.0,Reducing (H2),ethyl alcohol,163.5
+Li2CO3,10.0,N2,Deionized Water,163.0
+NH4H2PO4,2.0,Reducing (H2),Deionized Water,163.0
+CTAB,0.5,Vacuum,Deionized Water,163.0
+glucose,1.0,N2,Ethanol,163.0
+PhyA,1.0,Vacuum,Ethylene Glycol,162.2
+citric acid,10.0,Ar,Deionized Water,162.19
+glucose,1.0,N2,Deionized Water,162.0
+potassium ethyl xanthogenate,0.0,N2,CHCl3,162.0
+P2O5,0.33,N2,DMF,162.0
+LiI,24.0,Vacuum,acetonitrile,162.0
+Li2CO3,12.0,Ar,alcohol,161.9
+citric acid,1.0,N2,Deionized Water,161.5
+GO,1.0,Reducing (H2),concentrated sulfuric acid,161.2
+H3PO4,0.25,Ar,Ethanol,161.0
+LiDFOB,24.0,Ar,2-(2-Ethoxyethoxy) ethyl acrylate,161.0
+sucrose,1.0,Ar,Deionized Water,160.5
+LiH2PO4,12.0,Reducing (H2),Deionized Water,160.5
+LiH2PO4,0.08,Reducing (H2),Deionized Water,160.2
+9H2O,12.0,N2,Deionized Water,160.0
+ILE,2.0,Air,Methanol,160.0
+LiH2PO4,2.0,Reducing (H2),Ethylene Glycol,160.0
+PEO,2.0,Ar,anhydrous acetonitrile,160.0
+La2O3,24.0,Air,Isopropanol,160.0
+LiFePO4,5.0,Ar,Ethanol,160.0
+H3PO4,4.0,Ar,Deionized Water,160.0
+Li2CO3,0.08,Ar,Isopropanol,160.0
+lactose,4.0,Ar,acetone,160.0
+TPU,20.0,Other,DMF,160.0
+carbon coated lithium iron phosphate,24.0,Ar,acetonitrile,160.0
+DBTDL,12.0,Ar,THF,160.0
+alcohol,1.0,Ar,isopropyl alcohol,160.0
+TDI,3.0,Ar,chloroform,160.0
+NH3H2PO4,1.0,Ar,absolute alcohol,160.0
+Li2CO3,2.0,Air,alcohol,160.0
+H3PO4,5.0,N2,Deionized Water,160.0
+citric acid,3.0,Air,Deionized Water,160.0
+LiNO3,0.17,Air,Ethanol,159.6
+LLTO nanoparticles,5.0,Ar,PEO,159.6
+FePO4,4.0,N2,Deionized Water,159.1
+NH4H2PO4,4.0,N2,Ethanol,159.0
+Li2CO3,10.0,N2,Deionized Water,158.1
+Li2CO3,2.0,N2,Isopropanol,158.0
+CTAB,0.5,Reducing (H2),n-hexane,158.0
+thiophene,0.0,Other,thiophene monomer,158.0
+PF resin,5.0,N2,Ethanol,158.0
+citric acid,10.0,N2,Ethanol,158.0
+FePO4,10.0,N2,alcohol,157.6
+ammonium oxalate,4.0,N2,Deionized Water,157.5
+Li2CO3,6.0,N2,acetone,157.5
+LATP,24.0,Vacuum,NMP,157.0
+ferrous acetate tetrahydrate,2.0,Ar,Ethanol,157.0
+glucose,0.25,Ar,Deionized Water,156.5
+H3PO4,2.0,Ar,DMSO,156.4
+SO2Cl2,12.0,Other,anhydrous DCM,156.0
+SOCl2,12.0,N2,DCM,156.0
+CNTs,14.0,Reducing (H2),Deionized Water,156.0
+LiTFSI,6.0,Ar,Ethylene Glycol,155.5
+sucrose,4.0,Ar,Ethanol,155.5
+H3PO4,0.5,N2,Deionized Water,155.3
+PVP,2.0,Air,Deionized Water,155.27
+LATP,1.0,Air,acetonitrile,155.0
+LiH2PO4,15.0,Ar,Deionized Water,155.0
+lithium acetate dihydrate,3.0,Reducing (H2),Ethanol,155.0
+LiOH,1.0,Reducing (H2),Deionized Water,155.0
+glucose,2.0,Ar,Deionized Water,154.5
+LiOH,12.0,Reducing (H2),acetone,154.0
+ferrous hydroxide gel,0.25,Ar,Deionized Water,154.0
+MWCNTs,4.0,Ar,Ethylene Glycol,153.6
+LiTFSI,48.0,Vacuum,Acetonitrile,153.5
+PVP,1.0,Air,DMF,153.5
+FePO4,6.0,N2,Deionized Water,153.3
+NH4H2PO4,24.0,Ar,Deionized Water,153.0
+Fe2O3,12.0,N2,Deionized Water,153.0
+Li2CO3,0.17,Ar,Deionized Water,153.0
+LiTFSI,0.0,N2,anhydrous acetonitrile,153.0
+LiFePO4,3.0,N2,Isopropanol,153.0
+Sn(Oct)2,0.0,Ar,toluene,153.0
+CTAB,12.0,Ar,Deionized Water,152.1
+H2SO4,0.33,N2,Deionized Water,151.8
+FeSO4,0.67,Ar,glycol,151.7
+LiTFSI,48.0,Vacuum,Acetonitrile,151.0
+citric acid,4.0,Air,alcohol,151.0
+Li3PO4,0.5,Air,Ethylene Glycol,151.0
+LiNO3,2.0,Air,DMF,150.6
+LiTFSI,0.0,Ar,Pyr1(2O1)TFSI,150.5
+NaCl,12.0,Other,Deionized Water,150.3
+C6H12O6,2.0,Ar,Ethanol,150.2
+citric acid,1.0,Ar,Deionized Water,150.0
+Li particles,0.5,Ar,Ethanol,150.0
+sucrose,6.0,Air,Deionized Water,150.0
+H3PO4,0.17,N2,Deionized Water,150.0
+PEG,3.0,Reducing (H2),Deionized Water,150.0
+PVdF powder,0.25,Air,Deionized Water,150.0
+graphene nanofiber powders,0.33,Reducing (H2),Ethanol,150.0
+sodium metal,24.0,Ar,Deionized Water,150.0
+HCl,0.0,Other,Deionized Water,150.0
+Li2CO3(AR),5.0,Ar,Deionized Water,149.5
+CNC,1.0,Air,Deionized Water,149.1
+H3PO4,0.17,Ar,Ethylene Glycol,149.0
+LiOH,1.0,Reducing (H2),Deionized Water,149.0
+La2O3,48.0,Air,ethyl alcohol,148.8
+Li2CO3,12.0,Ar,ethyl alcohol,148.5
+La2O3,12.0,Air,alcohol,148.5
+Li2CO3,12.0,Air,Ethanol,148.0
+NH4H2PO4 powers,10.0,N2,Ethylene Glycol,147.5
+sol,1.0,Air,Ethanol,147.5
+Al(NO3)3,3.0,Air,Deionized Water,147.5
+FeC2O4,8.0,Ar,acetone,147.0
+Li foils,6.0,N2,Deionized Water,147.0
+Li2CO3,10.0,N2,Ethanol,146.7
+HCHO,3.0,Ar,Deionized Water,146.7
+FeCl2,30.0,Vacuum,oleylamine,146.5
+BCA,0.17,N2,toluene,146.0
+LiH2PO4,1.0,Reducing (H2),Deionized Water,146.0
+LiClO4,2.0,Ar,acetonitrile,145.8
+dibutyltin dilaurate,12.0,Ar,THF,145.0
+graphite,0.25,Ar,Deionized Water,145.0
+Ni foam,0.5,Ar,Deionized Water,144.8
+H2O2,12.0,N2,Deionized Water,144.8
+phenol,1.0,Ar,Deionized Water,144.4
+GO,2.0,Ar,Deionized Water,143.0
+commercial MnCO3,10.0,Ar,Ethanol,142.7
+anhydrous FePO4,20.0,Air,Ethanol,142.0
+glucose,10.0,N2,Deionized Water,141.3
+dry sodium hydride,0.17,Ar,dry tetrahydrofurane,141.0
+CuBr,48.0,Ar,Deionized Water,141.0
+KTFSI,2.0,Vacuum,Deionized Water,141.0
+FeC2O4,3.0,N2,Deionized Water,140.5
+LiOH,10.0,N2,ethyl alcohol,140.4
+PEG,12.0,N2,dry acetonitrile,140.0
+H3PO4,10.0,Reducing (H2),Deionized Water,140.0
+Li2CO3,2.0,Ar,Ethanol,139.0
+AIBN,48.0,N2,toluene,137.9
+CF papers,0.05,Ar,Deionized Water,137.0
+H3PO4,0.5,Ar,Deionized Water,136.4
+FeSO4 · 7H2O,3.0,Air,Deionized Water,135.1
+AgNO3,4.0,N2,Deionized Water,135.0
+C12H22O11,24.0,Ar,alcohol,135.0
+adipic acid,10.0,Air,Deionized Water,135.0
+H3PO4,2.0,Ar,Deionized Water,135.0
+Li2S,2.0,Air,Acetonitrile,133.0
+PEO,4.0,Air,Acetonitrile,133.0
+PAA,0.08,N2,DMAc,132.3
+ODA,0.5,N2,DMAc,132.3
+CNT,12.0,Ar,Deionized Water,132.3
+LiFBSI powder,3.0,Ar,Ethylene Glycol,130.7
+poly-acrylic acid,0.17,Ar,Deionized Water,130.0
+H3PO4,12.0,N2,Deionized Water,130.0
+PVP,0.5,Air,Ethanol,129.0
+Cu foam,2.0,Air,acetone,128.0
+HMTA,0.5,Vacuum,Deionized Water,127.0
+TEOS,2.0,Air,Ethanol,127.0
+NH4H2PO4,3.0,Ar,Deionized Water,124.7
+PPoA,2.0,N2,Deionized Water,123.5
+iron powder,4.0,N2,aqueous citric acid,122.0
+ZIF-8 nanoparticles,2.0,N2,DMF,121.7
+Li2CO3,7.0,Ar,Deionized Water,121.6
+H3BO3,4.0,Ar,propionic acid,120.0
+carbon cloth,1.0,N2,Deionized Water,119.0
+CTAB,0.5,Air,DMF,118.0
+NH4H2PO4,12.0,Ar,Deionized Water,116.3
+FePO4,6.0,Ar,Ethanol,116.1
+H3PO4,4.0,N2,Deionized Water,115.0
+LiTFSI,24.0,N2,DMAc,113.0
+PEO,48.0,N2,anhydrous acetonitrile,113.0
+LiTFSI,24.0,Vacuum,Deionized Water,110.2
+Li2CO3,24.0,Air,CHCl3,109.0
+LiOH,1.0,N2,supercritical alcohols,109.0
+benzyl disulfide,2.0,N2,alcohol,103.9
+Fe1.5P,4.0,Air,Ethanol,102.0
+BPA,24.0,Ar,acetonitrile,100.0
+Li2CO3,24.0,N2,acetone,100.0
+CL,24.0,Vacuum,THF,97.6
+TEA,24.0,Ar,THF,97.6
+LC,2.0,Other,Deionized Water,95.0
+PAN,12.0,N2,DMF,85.0
+Li metal,13.0,Ar,tetraglycol and oleylamine,72.0
+PAN,24.0,Ar,DMF,61.1
+acetylene black,12.0,Reducing (H2),Deionized Water,61.0
+Na2S,6.0,Ar,acetone,60.0

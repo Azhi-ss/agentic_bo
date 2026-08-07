@@ -1,0 +1,11 @@
+Precursor,Sintering_Time_Hours,Atmosphere,Solvent,Discharge_Capacity_mAh_g
+H3PO4,10.0,Reducing (H2),Deionized Water,170.0
+TEOS,20.0,Air,Deionized Water,170.0
+HCHO,3.0,Ar,Deionized Water,146.7
+LiNO3,1.0,Reducing (H2),Deionized Water,170.0
+NH4H2PO4 powers,10.0,N2,Ethylene Glycol,147.5
+commercial MnCO3,10.0,Ar,Ethanol,142.7
+oxalic acid,1.0,Reducing (H2),Deionized Water,170.0
+NH4H2PO4,6.0,Reducing (H2),ethyl alcohol,163.5
+LSC,0.33,N2,Ethanol,170.0
+Li2CO3,4.0,N2,Deionized Water,163.9
