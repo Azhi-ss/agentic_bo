@@ -80,9 +80,29 @@ def dominates(left: dict[str, Any], right: dict[str, Any], objectives: dict[str,
 def restrict_candidates(candidates: pd.DataFrame, restrictions: dict[str, Any]) -> pd.DataFrame:
     selected = candidates
     for feature, allowed in restrictions.items():
-        values = allowed if isinstance(allowed, list) else [allowed]
-        selected = selected[selected[feature].isin(values)]
+        if isinstance(allowed, list) and len(allowed) == 2 and pd.api.types.is_numeric_dtype(candidates[feature]) and len(allowed) < candidates[feature].nunique(dropna=False) and all(isinstance(value, (int, float)) for value in allowed):
+            selected = selected[selected[feature].between(allowed[0], allowed[1])]
+        else:
+            values = allowed if isinstance(allowed, list) else [allowed]
+            selected = selected[selected[feature].isin(values)]
     return selected
+
+
+def combine_restrictions(candidates: pd.DataFrame, active: dict[str, Any], temporary: dict[str, Any]) -> dict[str, Any]:
+    combined = dict(active)
+    for feature, restriction in temporary.items():
+        if feature not in combined:
+            combined[feature] = restriction
+            continue
+        allowed = restrict_candidates(candidates[[feature]], {feature: combined[feature]})
+        allowed = restrict_candidates(allowed, {feature: restriction})[feature].tolist()
+        if not allowed:
+            combined[feature] = []
+        elif pd.api.types.is_numeric_dtype(candidates[feature]) and len(allowed) < candidates[feature].nunique(dropna=False):
+            combined[feature] = [min(allowed), max(allowed)]
+        else:
+            combined[feature] = allowed
+    return combined
 
 
 
@@ -162,14 +182,24 @@ def suggest(
     try:
         study = load_state(state)
         candidates = load_candidates(study)
-        restrictions = {**study.active_bounds, **(parse_json_object(bounds, "bounds") if bounds else {})}
+        restrictions = combine_restrictions(candidates, study.active_bounds, parse_json_object(bounds, "bounds") if bounds else {})
         if around:
+            if not 0 < radius <= 1:
+                raise ValueError("radius must be in (0, 1]")
             incumbent_rows = [row for row in observed_records(study) if is_feasible(row, study.constraints)]
             if not incumbent_rows:
                 raise ValueError("around requires an observed incumbent")
             objective, direction = next(iter(study.objectives.items()))
             best = (max if direction == "maximize" else min)(incumbent_rows, key=lambda row: float(row[objective]))
-            restrictions.update({feature: [best[feature]] for feature in study.features})
+            local = {}
+            for feature in study.features:
+                domain = study.original_domain[feature]
+                if domain and all(isinstance(value, (int, float)) for value in domain):
+                    width = max(domain) - min(domain)
+                    local[feature] = [max(min(domain), best[feature] - radius * width), min(max(domain), best[feature] + radius * width)]
+                else:
+                    local[feature] = [best[feature]]
+            restrictions = combine_restrictions(candidates, restrictions, local)
         candidates = restrict_candidates(candidates, restrictions)
         available = np.array([index for index in candidates.index if index not in study.submitted], dtype=int)
         if not len(available):
@@ -338,7 +368,13 @@ def set_bounds(state: Path = typer.Option(...), bounds: str = typer.Option(...),
         study = load_state(state)
         parsed = parse_json_object(bounds, "bounds")
         for feature, values in parsed.items():
-            if feature not in study.features or not set(values if isinstance(values, list) else [values]) <= set(study.original_domain[feature]):
+            if feature not in study.features:
+                raise ValueError(f"unknown bound feature: {feature}")
+            allowed = study.original_domain[feature]
+            if isinstance(values, list) and len(values) == 2 and all(isinstance(value, (int, float)) for value in values) and all(isinstance(value, (int, float)) for value in allowed):
+                if values[0] > values[1] or values[0] < min(allowed) or values[1] > max(allowed):
+                    raise ValueError(f"bounds outside original domain: {feature}")
+            elif not set(values if isinstance(values, list) else [values]) <= set(allowed):
                 raise ValueError(f"bounds outside original domain: {feature}")
         revise(study, state, "active_bounds", parsed, rationale)
         emit(command, parsed, study=study)
@@ -353,7 +389,9 @@ def set_objectives(state: Path = typer.Option(...), objectives: str = typer.Opti
     try:
         study = load_state(state)
         parsed = parse_json_object(objectives, "objectives")
-        if not parsed or any(direction not in {"maximize", "minimize"} for direction in parsed.values()):
+        if len(parsed) != 1:
+            raise ValueError("multi-objective acquisition is not yet supported")
+        if any(direction not in {"maximize", "minimize"} for direction in parsed.values()):
             raise ValueError("objectives require maximize/minimize directions")
         revise(study, state, "objectives", parsed, rationale)
         emit(command, parsed, study=study)
@@ -368,8 +406,8 @@ def set_constraints(state: Path = typer.Option(...), constraints: str = typer.Op
     try:
         study = load_state(state)
         parsed = parse_json_list(constraints, "constraints")
-        if any("metric" not in item or ("lower" not in item and "upper" not in item) for item in parsed):
-            raise ValueError("constraints require metric and lower or upper")
+        if parsed:
+            raise ValueError("constraint-aware acquisition is not yet supported")
         revise(study, state, "constraints", parsed, rationale)
         emit(command, parsed, study=study)
     except Exception as exc:

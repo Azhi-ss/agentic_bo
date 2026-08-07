@@ -149,6 +149,23 @@ class LenzCliContractTest(unittest.TestCase):
             self.assertEqual(second.exit_code, 0, second.output)
             self.assertEqual(len(Study.load(state).pending), 2)
 
+    def test_numeric_bounds_are_intervals_and_temporary_bounds_only_narrow(self) -> None:
+        frame = pd.DataFrame({"x": [0, 1, 2, 3, 4, 5]})
+        from boagent.cli import combine_restrictions, restrict_candidates
+
+        self.assertEqual(restrict_candidates(frame, {"x": [1, 4]})["x"].tolist(), [1, 2, 3, 4])
+        self.assertEqual(combine_restrictions(frame, {"x": [1, 4]}, {"x": [3, 5]}), {"x": [3, 4]})
+
+    def test_rejects_unimplemented_multiobjective_and_constraint_setters(self) -> None:
+        with TemporaryDirectory() as directory:
+            state = create_state(Path(directory))
+            multi = runner.invoke(app, ["set-objectives", "--state", str(state), "--objectives", '{"Yield":"maximize","Cost":"minimize"}', "--rationale", "moo"])
+            constrained = runner.invoke(app, ["set-constraints", "--state", str(state), "--constraints", '[{"metric":"Cost","upper":5}]', "--rationale", "safe"])
+            self.assertNotEqual(multi.exit_code, 0)
+            self.assertNotEqual(constrained.exit_code, 0)
+            self.assertIn("not yet supported", multi.output)
+            self.assertIn("not yet supported", constrained.output)
+
     def test_score_defaults_to_persisted_policy_and_records_revision_audit(self) -> None:
         with TemporaryDirectory() as directory:
             state = create_state(Path(directory))
