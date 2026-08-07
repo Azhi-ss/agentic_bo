@@ -14,7 +14,9 @@ uv run boagent \
   --model Claude-4.8-opus
 ```
 
-The agent sees `train.csv`, `test_features.csv`, and the domain README. The trusted Oracle alone reads `test.csv`, returning only the committed row's metric. Each campaign writes `state.json` plus `seed_<seed>.pt`.
+The agent sees `train.csv`, `test_features.csv`, and — when the dataset root contains a `PRIOR.md` — that file's domain prior, injected into the `## Domain context` section of the generated `TASK.md`. The trusted Oracle alone reads `test.csv`, returning only the committed row's metric. Each campaign writes `state.json` plus `seed_<seed>.pt`.
+
+To give a dataset its own domain prior, add a `PRIOR.md` to its dataset root (see `datasets/chemical_reactions/suzuki/PRIOR.md` for the format). Keep it qualitative — reaction name, catalyst system, and favorable regime — with no label statistics, optimal values, or specific winning candidates; `boagent init` picks it up automatically and falls back to the generic Domain-context line when the file is absent.
 
 Direct lenz use:
 

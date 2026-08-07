@@ -148,6 +148,10 @@ _Avoid_: Trust score, decision
 Informal domain knowledge from instructions, documents, or code that Sara interprets during Deliberation and may translate into explicit decisions or Configuration Revisions.
 _Avoid_: Observation, hidden posterior mutation
 
+**Domain Prior**:
+The per-dataset, mechanism-level Natural-Language Prior loaded from an optional `PRIOR.md` in the dataset root. At `boagent init` time it is composed into the `## Domain context` section of `TASK.md`; when no `PRIOR.md` exists, the generic Domain-context line is used unchanged. It names the reaction/domain and its favorable operating regime at a qualitative level only — it must never encode label statistics, optimal values, or specific winning candidates derived from the labeled search space (that is data leakage).
+_Avoid_: Observation, Oracle Outcome, hidden label
+
 **Acquisition Policy**:
 The current method and parameters used by lenz to value or generate Proposals; its outputs remain Surrogate Advice.
 _Avoid_: Commitment policy
