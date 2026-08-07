@@ -97,6 +97,18 @@ def acquisition_values(
 def ranked_candidate_positions(scores: np.ndarray, q: int) -> np.ndarray:
     return np.argsort(-scores, kind="stable")[:q]
 
+def diverse_candidate_positions(scores: np.ndarray, x: torch.Tensor, q: int) -> np.ndarray:
+    if q <= 1:
+        return ranked_candidate_positions(scores, q)
+    chosen = [int(np.argmax(scores))]
+    distances = torch.cdist(x, x).cpu().numpy()
+    while len(chosen) < min(q, len(scores)):
+        remaining = [index for index in range(len(scores)) if index not in chosen]
+        scale = max(float(np.ptp(scores)), 1.0)
+        next_index = max(remaining, key=lambda index: float(scores[index]) + scale * min(distances[index, selected] for selected in chosen))
+        chosen.append(next_index)
+    return np.array(chosen, dtype=int)
+
 
 def _cross_validated_r2(train_x: torch.Tensor, train_y: torch.Tensor) -> tuple[float | None, str]:
     if len(train_y) < 3:

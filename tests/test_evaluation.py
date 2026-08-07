@@ -5,7 +5,7 @@ import unittest
 import pandas as pd
 import torch
 
-from boagent.evaluation import validate_trajectory
+from boagent.evaluation import SEEDS, summarize, validate_trajectory
 
 
 class EvaluationTest(unittest.TestCase):
@@ -101,6 +101,14 @@ class EvaluationTest(unittest.TestCase):
             self.assertEqual(result["best_found"], 2.0)
             self.assertEqual(result["round_to_95_global_best"], 2)
             self.assertEqual(result["auc_best_so_far"], 6.0)
+
+    def test_paper_protocol_uses_ten_seeds_and_median_iqr(self) -> None:
+        self.assertEqual(len(SEEDS), 10)
+        summary = summarize([
+            {"initial_round_found_best": value, "best_found": value, "round_to_95_global_best": value, "auc_best_so_far": value, "simple_regret": value}
+            for value in range(1, 5)
+        ])
+        self.assertEqual(summary["simple_regret"], {"median": 2.5, "q25": 1.75, "q75": 3.25})
 
 
 if __name__ == "__main__":

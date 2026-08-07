@@ -60,11 +60,19 @@ class Study:
     configuration_revision: int = 1
     acqf: str = "noisy_logei"
     beta: float = 2.0
+    objectives: dict[str, str] = field(default_factory=dict)
+    constraints: list[dict[str, Any]] = field(default_factory=list)
+    original_domain: dict[str, list[Any]] = field(default_factory=dict)
+    active_bounds: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def load(cls, path: Path) -> Study:
         raw = json.loads(path.read_text())
         raw["trials"] = [Trial(**trial) for trial in raw.get("trials", [])]
+        raw.setdefault("objectives", {raw["target"]: raw["direction"]})
+        raw.setdefault("constraints", [])
+        raw.setdefault("original_domain", raw["categories"])
+        raw.setdefault("active_bounds", {})
         initial = raw.get("initial", [])
         if initial and not any(trial.source == "historical" for trial in raw["trials"]):
             features = raw["features"]

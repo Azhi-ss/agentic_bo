@@ -10,7 +10,7 @@ import numpy as np
 import pandas as pd
 import typer
 
-from .backend import acquisition_values, diagnostics as model_diagnostics, encode_frame, fit_surrogate, posterior_rows, ranked_candidate_positions
+from .backend import acquisition_values, diagnostics as model_diagnostics, diverse_candidate_positions, encode_frame, fit_surrogate, posterior_rows
 from .oracle import verify_receipt
 from .state import Study, Trial, candidate_id, envelope, now
 
@@ -32,7 +32,7 @@ def load_candidates(study: Study) -> pd.DataFrame:
 
 
 def config_at(candidates: pd.DataFrame, index: int, features: list[str]) -> dict[str, Any]:
-    if index < 0 or index >= len(candidates):
+    if index not in candidates.index:
         raise ValueError(f"query_index out of range: {index}")
     return candidates.loc[index, features].to_dict()
 
@@ -57,6 +57,52 @@ def parse_json_list(value: str, name: str) -> list[Any]:
     if not isinstance(parsed, list):
         raise ValueError(f"{name} must be a JSON list")
     return parsed
+
+
+
+def observed_records(study: Study) -> list[dict[str, Any]]:
+    return [*study.initial, *[{**trial.config, **(trial.metrics or {})} for trial in study.all_observed]]
+
+
+def is_feasible(row: dict[str, Any], constraints: list[dict[str, Any]]) -> bool:
+    return all(
+        (constraint.get("lower") is None or float(row[constraint["metric"]]) >= float(constraint["lower"]))
+        and (constraint.get("upper") is None or float(row[constraint["metric"]]) <= float(constraint["upper"]))
+        for constraint in constraints
+    )
+
+
+def dominates(left: dict[str, Any], right: dict[str, Any], objectives: dict[str, str]) -> bool:
+    weak = all(float(left[key]) >= float(right[key]) if direction == "maximize" else float(left[key]) <= float(right[key]) for key, direction in objectives.items())
+    strict = any(float(left[key]) > float(right[key]) if direction == "maximize" else float(left[key]) < float(right[key]) for key, direction in objectives.items())
+    return weak and strict
+
+def restrict_candidates(candidates: pd.DataFrame, restrictions: dict[str, Any]) -> pd.DataFrame:
+    selected = candidates
+    for feature, allowed in restrictions.items():
+        if isinstance(allowed, list) and len(allowed) == 2 and pd.api.types.is_numeric_dtype(candidates[feature]) and len(allowed) < candidates[feature].nunique(dropna=False) and all(isinstance(value, (int, float)) for value in allowed):
+            selected = selected[selected[feature].between(allowed[0], allowed[1])]
+        else:
+            values = allowed if isinstance(allowed, list) else [allowed]
+            selected = selected[selected[feature].isin(values)]
+    return selected
+
+
+def combine_restrictions(candidates: pd.DataFrame, active: dict[str, Any], temporary: dict[str, Any]) -> dict[str, Any]:
+    combined = dict(active)
+    for feature, restriction in temporary.items():
+        if feature not in combined:
+            combined[feature] = restriction
+            continue
+        allowed = restrict_candidates(candidates[[feature]], {feature: combined[feature]})
+        allowed = restrict_candidates(allowed, {feature: restriction})[feature].tolist()
+        if not allowed:
+            combined[feature] = []
+        elif pd.api.types.is_numeric_dtype(candidates[feature]) and len(allowed) < candidates[feature].nunique(dropna=False):
+            combined[feature] = [min(allowed), max(allowed)]
+        else:
+            combined[feature] = allowed
+    return combined
 
 
 
@@ -112,6 +158,8 @@ def create(
             categories=categories,
             trials=historical,
         )
+        study.objectives = {target: direction}
+        study.original_domain = categories
         study.append_event("campaign_created", candidates=len(candidates), initial=len(train))
         study.save(state)
         emit(command, {"features": features, "target": target, "direction": direction, "initial": len(train), "candidates": len(candidates), "budget": budget, "acqf": study.acqf}, study=study)
@@ -126,11 +174,33 @@ def suggest(
     q: int = typer.Option(1, min=1),
     acqf: str | None = typer.Option(None),
     beta: float | None = typer.Option(None),
+    bounds: str | None = typer.Option(None),
+    around: bool = typer.Option(False),
+    radius: float = typer.Option(0.1),
 ) -> None:
     command = "suggest"
     try:
         study = load_state(state)
         candidates = load_candidates(study)
+        restrictions = combine_restrictions(candidates, study.active_bounds, parse_json_object(bounds, "bounds") if bounds else {})
+        if around:
+            if not 0 < radius <= 1:
+                raise ValueError("radius must be in (0, 1]")
+            incumbent_rows = [row for row in observed_records(study) if is_feasible(row, study.constraints)]
+            if not incumbent_rows:
+                raise ValueError("around requires an observed incumbent")
+            objective, direction = next(iter(study.objectives.items()))
+            best = (max if direction == "maximize" else min)(incumbent_rows, key=lambda row: float(row[objective]))
+            local = {}
+            for feature in study.features:
+                domain = study.original_domain[feature]
+                if domain and all(isinstance(value, (int, float)) for value in domain):
+                    width = max(domain) - min(domain)
+                    local[feature] = [max(min(domain), best[feature] - radius * width), min(max(domain), best[feature] + radius * width)]
+                else:
+                    local[feature] = [best[feature]]
+            restrictions = combine_restrictions(candidates, restrictions, local)
+        candidates = restrict_candidates(candidates, restrictions)
         available = np.array([index for index in candidates.index if index not in study.submitted], dtype=int)
         if not len(available):
             emit(command, [], study=study)
@@ -146,7 +216,7 @@ def suggest(
             x = encode_frame(candidates.loc[available, study.features], study)
             scores = acquisition_values(fitted, x, name, beta if beta is not None else study.beta)
             mean, variance = posterior_rows(fitted, x, study.direction)
-            order = ranked_candidate_positions(scores, q)
+            order = diverse_candidate_positions(scores, x, q)
             result = []
             for position in order:
                 config = config_at(candidates, int(available[position]), study.features)
@@ -179,8 +249,8 @@ def submit(
                 raise ValueError("request_id conflicts with a different candidate")
             emit(command, vars(existing[0]), study=study)
             return
-        if study.pending:
-            raise ValueError("a sequential trial is already in flight")
+        if len(study.observed) + len(study.pending) >= study.budget:
+            raise ValueError("evaluation budget exhausted")
         if index in study.submitted:
             raise ValueError("candidate already submitted; benchmark replicates are forbidden")
         if len(study.observed) >= study.budget:
@@ -281,6 +351,69 @@ def set_acqf(
         emit(command, error=str(exc))
         raise typer.Exit(1) from exc
 
+def revise(study: Study, state: Path, field: str, value: Any, rationale: str) -> None:
+    previous = getattr(study, field)
+    setattr(study, field, value)
+    if field == "objectives":
+        study.target, study.direction = next(iter(value.items()))
+    study.configuration_revision += 1
+    study.append_event("configuration_revised", field=field, previous=previous, current=value, rationale=rationale)
+    study.save(state)
+
+
+@app.command("set-bounds")
+def set_bounds(state: Path = typer.Option(...), bounds: str = typer.Option(...), rationale: str = typer.Option(...)) -> None:
+    command = "set-bounds"
+    try:
+        study = load_state(state)
+        parsed = parse_json_object(bounds, "bounds")
+        for feature, values in parsed.items():
+            if feature not in study.features:
+                raise ValueError(f"unknown bound feature: {feature}")
+            allowed = study.original_domain[feature]
+            if isinstance(values, list) and len(values) == 2 and all(isinstance(value, (int, float)) for value in values) and all(isinstance(value, (int, float)) for value in allowed):
+                if values[0] > values[1] or values[0] < min(allowed) or values[1] > max(allowed):
+                    raise ValueError(f"bounds outside original domain: {feature}")
+            elif not set(values if isinstance(values, list) else [values]) <= set(allowed):
+                raise ValueError(f"bounds outside original domain: {feature}")
+        revise(study, state, "active_bounds", parsed, rationale)
+        emit(command, parsed, study=study)
+    except Exception as exc:
+        emit(command, error=str(exc))
+        raise typer.Exit(1) from exc
+
+
+@app.command("set-objectives")
+def set_objectives(state: Path = typer.Option(...), objectives: str = typer.Option(...), rationale: str = typer.Option(...)) -> None:
+    command = "set-objectives"
+    try:
+        study = load_state(state)
+        parsed = parse_json_object(objectives, "objectives")
+        if len(parsed) != 1:
+            raise ValueError("multi-objective acquisition is not yet supported")
+        if any(direction not in {"maximize", "minimize"} for direction in parsed.values()):
+            raise ValueError("objectives require maximize/minimize directions")
+        revise(study, state, "objectives", parsed, rationale)
+        emit(command, parsed, study=study)
+    except Exception as exc:
+        emit(command, error=str(exc))
+        raise typer.Exit(1) from exc
+
+
+@app.command("set-constraints")
+def set_constraints(state: Path = typer.Option(...), constraints: str = typer.Option(...), rationale: str = typer.Option(...)) -> None:
+    command = "set-constraints"
+    try:
+        study = load_state(state)
+        parsed = parse_json_list(constraints, "constraints")
+        if parsed:
+            raise ValueError("constraint-aware acquisition is not yet supported")
+        revise(study, state, "constraints", parsed, rationale)
+        emit(command, parsed, study=study)
+    except Exception as exc:
+        emit(command, error=str(exc))
+        raise typer.Exit(1) from exc
+
 
 @app.command()
 def predict(state: Path = typer.Option(...), configs: str = typer.Option(...)) -> None:
@@ -356,12 +489,26 @@ def incumbent(state: Path = typer.Option(...)) -> None:
     command = "incumbent"
     try:
         study = load_state(state)
-        records = [*study.initial, *[{**trial.config, **(trial.metrics or {})} for trial in study.all_observed]]
+        records = [row for row in observed_records(study) if is_feasible(row, study.constraints)]
         if not records:
-            raise ValueError("need observed trials")
-        key = lambda row: float(row[study.target])
-        best = (max if study.direction == "maximize" else min)(records, key=key)
-        emit(command, {"config": {feature: best[feature] for feature in study.features}, "metrics": {study.target: float(best[study.target])}}, study=study)
+            raise ValueError("need a feasible observed trial")
+        objective, direction = next(iter(study.objectives.items()))
+        key = lambda row: float(row[objective])
+        best = (max if direction == "maximize" else min)(records, key=key)
+        emit(command, {"config": {feature: best[feature] for feature in study.features}, "metrics": {metric: float(best[metric]) for metric in {*study.objectives, *(constraint["metric"] for constraint in study.constraints)}}}, study=study)
+    except Exception as exc:
+        emit(command, error=str(exc))
+        raise typer.Exit(1) from exc
+
+
+@app.command()
+def pareto(state: Path = typer.Option(...)) -> None:
+    command = "pareto"
+    try:
+        study = load_state(state)
+        records = [row for row in observed_records(study) if is_feasible(row, study.constraints)]
+        front = [row for row in records if not any(dominates(other, row, study.objectives) for other in records if other is not row)]
+        emit(command, [{"config": {feature: row[feature] for feature in study.features}, "metrics": {metric: float(row[metric]) for metric in study.objectives}} for row in front], study=study)
     except Exception as exc:
         emit(command, error=str(exc))
         raise typer.Exit(1) from exc

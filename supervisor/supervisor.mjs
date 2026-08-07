@@ -110,6 +110,7 @@ const toolContext = async () => {
     preferred_suggestion: preferredSuggestion(offered),
     diagnostics: requireOk(diagnostics, "diagnostics"),
     verified_trials: verifiedTrialFacts(requireOk(trials, "trials")),
+    effective_manifest: { ...manifest, target: status.result.target, direction: status.result.direction },
   };
 };
 
@@ -186,7 +187,7 @@ for (let step = context.status.observed; step < manifest.budget; step += 1) {
       const action = requireCampaignAction(campaignAction);
       if (action.type === "stop_campaign") {
         context = await toolContext();
-        verifyStop(action, manifest, context);
+        verifyStop(action, context.effective_manifest, context);
         stopped = {
           status: "stopped",
           campaign_id: manifest.campaign_id,
@@ -204,7 +205,7 @@ for (let step = context.status.observed; step < manifest.budget; step += 1) {
       const commitment = verifyCommitment(action, context.suggestions, context.verified_trials);
       enforcePreferredSuggestion(commitment, context.preferred_suggestion, manifest.budget - context.status.observed);
       const selectedScore = await acquisitionScore(commitment, context, async (config) => requireOk(await lenz("score", "--state", state, "--configs", JSON.stringify([config])), "score"));
-      decision = requirePolicyAllowance(verifyOptimizationPolicy({ commitment, selectedScore, context, trajectory, manifest }));
+      decision = requirePolicyAllowance(verifyOptimizationPolicy({ commitment, selectedScore, context, trajectory, manifest: context.effective_manifest }));
       break;
     } catch (error) {
       if (attempt === maxActionAttempts) throw error;
