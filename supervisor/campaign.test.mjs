@@ -316,7 +316,7 @@ test("Sara can inspect and reconfigure lenz through typed tools", async () => {
   }, "/campaign/frame/state.json");
 
   assert.deepEqual(tools.map((tool) => tool.name), [
-    "lenz_suggest", "lenz_predict", "lenz_score", "lenz_diagnostics", "lenz_set_acqf",
+    "lenz_suggest", "lenz_predict", "lenz_score", "lenz_diagnostics", "lenz_trials", "lenz_set_acqf",
   ]);
   const setAcqf = tools.find((tool) => tool.name === "lenz_set_acqf");
   await setAcqf.execute("call-1", { acqf: "ucb", beta: 3, rationale: "Explore uncertainty." });
@@ -333,6 +333,33 @@ test("terminal status is authoritative only when fully bound to the current Fram
   assert.throws(() => validateCampaignStatus({ ...status, verified: false }, { campaign_id: "campaign-a", budget: 4 }, frame), /verified stop/);
 });
 
+test("historical observations do not spend campaign stop budget", () => {
+  const frame = {
+    state_revision: 8,
+    trials: [
+      { trial_id: "historical-0", source: "historical", status: "observed" },
+      { trial_id: "trial-a", source: "campaign", status: "observed" },
+    ],
+  };
+  const status = { status: "stopped", campaign_id: "campaign-a", state_revision: 8, observed: 1, budget: 4, budget_remaining: 3, condition: "target_reached", rationale: "verified", verified: true };
+
+  assert.equal(validateCampaignStatus(status, { campaign_id: "campaign-a", budget: 4 }, frame), status);
+});
+
+test("trajectory recovery excludes historical observations", () => {
+  const frame = {
+    trials: [
+      { trial_id: "historical-0", source: "historical", query_index: null, candidate_id: "history", config: { x: 0 }, status: "observed", metrics: { Yield: 80 } },
+      { trial_id: "trial-a", source: "campaign", query_index: 1, candidate_id: "candidate-a", config: { x: 1 }, status: "observed", metrics: { Yield: 90 } },
+    ],
+  };
+
+  const trajectory = reconcileTrajectory(frame, []);
+
+  assert.equal(trajectory.length, 1);
+  assert.equal(trajectory[0].trial_id, "trial-a");
+});
+
 test("Supervisor rejects unsupported stop predicates", () => {
   const context = { status: { remaining: 2, pending: [] }, verified_trials: [] };
   assert.throws(() => verifyStop({ condition: "target_reached" }, { target: "Yield", direction: "maximize" }, context), /quantitative target/);
@@ -346,6 +373,21 @@ test("Supervisor accepts evidence-backed stop predicates", () => {
   };
   assert.doesNotThrow(() => verifyStop({ condition: "target_reached" }, { target: "Yield", direction: "maximize", target_value: 90 }, context));
   assert.doesNotThrow(() => verifyStop({ condition: "observed_candidates_exhausted" }, {}, context));
+});
+
+test("historical observations cannot satisfy campaign target stops", () => {
+  const context = {
+    status: { remaining: 1, pending: [] },
+    verified_trials: [
+      { source: "historical", metrics: { Yield: 99 } },
+      { source: "campaign", metrics: { Yield: 80 } },
+    ],
+  };
+
+  assert.throws(
+    () => verifyStop({ condition: "target_reached" }, { target: "Yield", target_value: 90, direction: "maximize" }, context),
+    /not supported by verified observations/,
+  );
 });
 
 test("Frame reconciliation preserves rationale and recovers missing journal fields", () => {

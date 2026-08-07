@@ -52,6 +52,54 @@ class LenzCliContractTest(unittest.TestCase):
                 self.assertEqual(result.exit_code, 0, result.output)
                 self.assertIn('"ok": true', result.output)
 
+    def test_create_exposes_historical_observations_without_spending_campaign_budget(self) -> None:
+        with TemporaryDirectory() as directory:
+            state = create_state(Path(directory))
+
+            trials = runner.invoke(app, ["trials", "--state", str(state)])
+            status = runner.invoke(app, ["status", "--state", str(state)])
+
+            self.assertEqual(trials.exit_code, 0, trials.output)
+            trial_rows = json.loads(trials.output)["result"]
+            self.assertEqual(len(trial_rows), 2)
+            self.assertTrue(all(row["source"] == "historical" for row in trial_rows))
+            self.assertTrue(all(row["status"] == "observed" for row in trial_rows))
+            self.assertEqual(trial_rows[0]["metrics"], {"Yield": 80.0})
+            status_payload = json.loads(status.output)["result"]
+            self.assertEqual(status_payload["historical_observed"], 2)
+            self.assertEqual(status_payload["observed"], 0)
+            self.assertEqual(status_payload["budget_remaining"], 2)
+
+    def test_submit_budget_counts_only_campaign_observations(self) -> None:
+        with TemporaryDirectory() as directory:
+            state = create_state(Path(directory))
+
+            result = runner.invoke(app, [
+                "submit", "--state", str(state), "--pool-index", "0",
+                "--config", '{"ligand":"PPh3","base":"KOH"}', "--request-id", "request-1",
+            ])
+
+            self.assertEqual(result.exit_code, 0, result.output)
+            self.assertEqual(json.loads(result.output)["result"]["source"], "campaign")
+
+    def test_load_migrates_legacy_initial_rows_into_historical_trials(self) -> None:
+        with TemporaryDirectory() as directory:
+            state = create_state(Path(directory))
+            payload = json.loads(state.read_text())
+            historical = [trial for trial in payload["trials"] if trial["source"] == "historical"]
+            payload["initial"] = [
+                {**trial["config"], "Yield": trial["metrics"]["Yield"]}
+                for trial in historical
+            ]
+            payload["trials"] = [trial for trial in payload["trials"] if trial["source"] != "historical"]
+            state.write_text(json.dumps(payload))
+
+            migrated = Study.load(state)
+
+            self.assertEqual(len(migrated.historical), 2)
+            self.assertEqual(migrated.initial, [])
+            self.assertEqual(migrated.historical[0].metrics, {"Yield": 80.0})
+
     def test_score_defaults_to_persisted_policy_and_records_revision_audit(self) -> None:
         with TemporaryDirectory() as directory:
             state = create_state(Path(directory))
@@ -157,6 +205,53 @@ class LenzCliContractTest(unittest.TestCase):
 
             self.assertEqual(result.exit_code, 0, result.output)
             self.assertEqual(Path(process.call_args.kwargs["env"]["PATH"].split(os.pathsep)[0]), Path(sys.executable).resolve().parent)
+
+    def test_init_gives_agent_a_leak_free_dataset_summary(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            pd.DataFrame([
+                {"product": "A", "ligand": "PPh3", "temperature": 80, "Yield": 10.0},
+                {"product": "B", "ligand": "XPhos", "temperature": 100, "Yield": 70.0},
+            ]).to_csv(root / "train.csv", index=False)
+            pd.DataFrame([
+                {"product": "B", "ligand": "PPh3", "temperature": 80},
+                {"product": "B", "ligand": "XPhos", "temperature": 100},
+            ]).to_csv(root / "test_features.csv", index=False)
+            (root / "options.json").write_text(json.dumps({
+                "product": ["A", "B"], "ligand": ["PPh3", "XPhos"], "temperature": [80, 100],
+                "catalyst": ["Pd"],
+            }))
+            (root / "README.md").write_text("# Reaction dataset\n\nOptimize this coupling reaction without hidden labels.\n")
+
+            with patch("boagent.agent_cli.subprocess.run"):
+                result = runner.invoke(agent_app, [
+                    "init", "--dataset-root", str(root), "--output", str(root / "campaign"), "--budget", "40",
+                ])
+
+            self.assertEqual(result.exit_code, 0, result.output)
+            task = (root / "campaign" / "TASK.md").read_text()
+            summary = json.loads((root / "campaign" / "dataset-summary.json").read_text())
+            self.assertIn("## Dataset understanding", task)
+            self.assertIn(json.dumps(summary, ensure_ascii=False, indent=2), task)
+            self.assertEqual(summary["rows"], {"initial_observations": 2, "candidate_pool": 2})
+            self.assertEqual(summary["features"]["product"]["role"], "context")
+            self.assertEqual(summary["features"]["temperature"]["kind"], "numeric_discrete")
+            self.assertEqual(summary["target"]["initial_observed"]["maximum"], 70.0)
+            self.assertNotIn("test.csv", task)
+
+    def test_init_rejects_misaligned_dataset_schema(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            pd.DataFrame([{"x": 1, "Yield": 2.0}]).to_csv(root / "train.csv", index=False)
+            pd.DataFrame([{"y": 1}]).to_csv(root / "test_features.csv", index=False)
+            (root / "options.json").write_text(json.dumps({"x": [1], "y": [1]}))
+
+            result = runner.invoke(agent_app, [
+                "init", "--dataset-root", str(root), "--output", str(root / "campaign"),
+            ])
+
+            self.assertNotEqual(result.exit_code, 0)
+            self.assertIn("train/test_features schema mismatch", result.output)
 
 
     def test_export_writes_target_direction_and_observed_value(self) -> None:

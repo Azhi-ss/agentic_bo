@@ -26,6 +26,28 @@ def project_env() -> dict[str, str]:
     env["PATH"] = os.pathsep.join([*(str(path) for path in dict.fromkeys(candidates)), env.get("PATH", "")])
     return env
 
+def summarize_dataset(train: pd.DataFrame, candidates: pd.DataFrame, target: str) -> dict[str, object]:
+    features = candidates.columns.tolist()
+    return {
+        "rows": {"initial_observations": len(train), "candidate_pool": len(candidates)},
+        "features": {
+            feature: {
+                "kind": "numeric_discrete" if pd.api.types.is_numeric_dtype(candidates[feature]) else "categorical",
+                "role": "context" if candidates[feature].nunique(dropna=False) == 1 and train[feature].nunique(dropna=False) > 1 else "decision",
+                "candidate_values": int(candidates[feature].nunique(dropna=False)),
+            }
+            for feature in features
+        },
+        "target": {
+            "name": target,
+            "initial_observed": {
+                "minimum": float(train[target].min()),
+                "maximum": float(train[target].max()),
+                "mean": float(train[target].mean()),
+            },
+        },
+    }
+
 
 @app.command()
 def init(
@@ -38,6 +60,11 @@ def init(
 ) -> None:
     dataset_root = dataset_root.resolve()
     output = output.resolve()
+    candidates = pd.read_csv(dataset_root / "test_features.csv")
+    train_path = dataset_root / "train.csv"
+    train = pd.read_csv(train_path) if train_path.exists() else None
+    if train is not None and (list(train.columns[:-1]) != candidates.columns.tolist() or train.columns[-1] != target):
+        raise typer.BadParameter("train/test_features schema mismatch")
     output.mkdir(parents=True, exist_ok=False)
     campaign_id = str(uuid.uuid4())
     manifest = {
@@ -50,15 +77,28 @@ def init(
     }
     (output / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2))
     options = json.loads((dataset_root / "options.json").read_text())
-    public_options = {feature: options[feature] for feature in pd.read_csv(dataset_root / "test_features.csv").columns}
+    public_options = {feature: options[feature] for feature in candidates.columns}
+    summary_note = ""
+    if train is not None:
+        summary = summarize_dataset(train, candidates, target)
+        summary_json = json.dumps(summary, ensure_ascii=False, indent=2)
+        (output / "dataset-summary.json").write_text(summary_json)
+        summary_note = f"\n\n## Dataset understanding\n\n```json\n{summary_json}\n```"
+    prior_path = dataset_root / "PRIOR.md"
+    domain_context = (
+        "Use domain priors to compare exact public Candidates. You may inspect and reconfigure lenz through the typed tools exposed by the Campaign Supervisor. "
+        "Only identical candidate_id values are Replicates; Experiment Receipts are the sole source of new Outcomes."
+    )
+    if prior_path.exists():
+        domain_context += "\n\n" + prior_path.read_text(encoding="utf-8").strip()
     (output / "TASK.md").write_text(
         "# Optimization Task\n\n"
         f"Optimize `{target}` with direction `{direction}` using {budget} sequential black-box evaluations. "
         "The domain is a finite public candidate pool. Hidden outcomes are never available before commitment.\n\n"
         f"## Search variables\n\n```json\n{json.dumps(public_options, ensure_ascii=False, indent=2)}\n```\n\n"
         "## Domain context\n\n"
-        "Use domain priors to compare exact public Candidates. You may inspect and reconfigure lenz through the typed tools exposed by the Campaign Supervisor. "
-        "Only identical candidate_id values are Replicates; Experiment Receipts are the sole source of new Outcomes.\n"
+        f"{domain_context}"
+        f"{summary_note}\n"
     )
     (output / "CAMPAIGN.md").write_text(
         f"# Campaign\n\n- Campaign ID: `{campaign_id}`\n- Seed: `{seed}`\n- Budget: `{budget}` sequential evaluations\n- Target: `{target}` ({direction})\n- Public inputs: the sanitized task description and Supervisor-supplied Frame outputs.\n- Hidden labels are available only through signed Experiment Receipts.\n"

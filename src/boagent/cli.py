@@ -88,6 +88,18 @@ def create(
             feature: pd.concat([train[feature], candidates[feature]], ignore_index=True).drop_duplicates().tolist()
             for feature in features
         }
+        historical = [
+            Trial(
+                trial_id=f"historical-{index}",
+                candidate_id=candidate_id({feature: row[feature] for feature in features}),
+                query_index=None,
+                config={feature: row[feature] for feature in features},
+                status="observed",
+                source="historical",
+                metrics={target: float(row[target])},
+            )
+            for index, row in enumerate(train.to_dict("records"))
+        ]
         study = Study(
             study_id=str(uuid.uuid4()),
             campaign_id=campaign_id or str(uuid.uuid4()),
@@ -98,7 +110,7 @@ def create(
             budget=budget,
             features=features,
             categories=categories,
-            initial=train.to_dict("records"),
+            trials=historical,
         )
         study.append_event("campaign_created", candidates=len(candidates), initial=len(train))
         study.save(state)
@@ -344,7 +356,7 @@ def incumbent(state: Path = typer.Option(...)) -> None:
     command = "incumbent"
     try:
         study = load_state(state)
-        records = [*study.initial, *[{**trial.config, **(trial.metrics or {})} for trial in study.observed]]
+        records = [*study.initial, *[{**trial.config, **(trial.metrics or {})} for trial in study.all_observed]]
         if not records:
             raise ValueError("need observed trials")
         key = lambda row: float(row[study.target])
@@ -360,7 +372,7 @@ def trials(state: Path = typer.Option(...)) -> None:
     command = "trials"
     try:
         study = load_state(state)
-        emit(command, [vars(trial) for trial in study.trials], study=study)
+        emit(command, [vars(trial) for trial in study.all_observed + study.pending], study=study)
     except Exception as exc:
         emit(command, error=str(exc))
         raise typer.Exit(1) from exc
@@ -372,7 +384,7 @@ def status(state: Path = typer.Option(...)) -> None:
     try:
         study = load_state(state)
         candidates = load_candidates(study)
-        emit(command, {"campaign_id": study.campaign_id, "target": study.target, "direction": study.direction, "acqf": study.acqf, "budget": study.budget, "initial": len(study.initial), "observed": len(study.observed), "pending": [trial.trial_id for trial in study.pending], "remaining": len(candidates) - len(study.submitted)}, study=study)
+        emit(command, {"campaign_id": study.campaign_id, "target": study.target, "direction": study.direction, "acqf": study.acqf, "beta": study.beta, "budget": study.budget, "initial": len(study.historical), "historical_observed": len(study.historical), "observed": len(study.observed), "pending": [trial.trial_id for trial in study.pending], "budget_remaining": study.budget - len(study.observed), "remaining": len(candidates) - len(study.submitted)}, study=study)
     except Exception as exc:
         emit(command, error=str(exc))
         raise typer.Exit(1) from exc

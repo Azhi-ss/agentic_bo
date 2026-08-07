@@ -12,8 +12,8 @@ export const validateCampaignStatus = (status, manifest, frame) => {
   if (!status || status.status !== "stopped") return undefined;
   if (status.campaign_id !== manifest.campaign_id) throw new Error("campaign status campaign_id mismatch");
   if (status.state_revision !== frame.state_revision) throw new Error("campaign status state_revision mismatch");
-  const observed = frame.trials.filter((trial) => trial.status === "observed").length;
-  const pending = frame.trials.filter((trial) => trial.status === "pending").length;
+  const observed = frame.trials.filter((trial) => trial.status === "observed" && trial.source !== "historical").length;
+  const pending = frame.trials.filter((trial) => trial.status === "pending" && trial.source !== "historical").length;
   if (status.observed !== observed) throw new Error("campaign status observed count mismatch");
   if (pending !== 0) throw new Error("stopped campaign cannot have pending trials");
   if (status.budget !== manifest.budget || status.budget_remaining !== manifest.budget - observed) throw new Error("campaign status budget mismatch");
@@ -26,7 +26,7 @@ export const verifyStop = (action, manifest, context) => {
   if (action.condition === "target_reached") {
     const threshold = manifest.target_value ?? manifest.target_threshold;
     if (!Number.isFinite(threshold)) throw new Error("target_reached requires a quantitative target threshold");
-    const values = context.verified_trials.map((trial) => trial.metrics?.[manifest.target]).filter(Number.isFinite);
+    const values = context.verified_trials.filter((trial) => trial.source !== "historical").map((trial) => trial.metrics?.[manifest.target]).filter(Number.isFinite);
     const reached = manifest.direction === "minimize"
       ? values.some((value) => value <= threshold)
       : values.some((value) => value >= threshold);
@@ -41,6 +41,7 @@ export const verifyStop = (action, manifest, context) => {
 export const reconcileTrajectory = (frame, trajectory, receiptForTrial = () => undefined) => {
   const entries = trajectory.map((entry) => ({ ...entry }));
   for (const trial of frame.trials) {
+    if (trial.source === "historical") continue;
     let entry = entries.find((item) => item.trial_id === trial.trial_id || item.request_id === trial.request_id);
     if (!entry) {
       entry = { rationale: null, provenance: "recovered" };
@@ -162,6 +163,10 @@ export const createLenzTools = (lenz, state, onMutation = () => {}) => [
   defineTool({
     name: "lenz_diagnostics", label: "Lenz Diagnostics", description: "Inspect current surrogate diagnostics.", parameters: Type.Object({}),
     async execute() { return result(await lenz("diagnostics", "--state", state)); },
+  }),
+  defineTool({
+    name: "lenz_trials", label: "Lenz Trials", description: "Inspect the complete observed trial log, including historical and campaign observations.", parameters: Type.Object({}),
+    async execute() { return result(await lenz("trials", "--state", state)); },
   }),
   defineTool({
     name: "lenz_set_acqf", label: "Lenz Set Acquisition", description: "Persist an audited acquisition policy revision.",
@@ -400,5 +405,6 @@ export const verifiedTrialFacts = (trials) => trials.map((trial) => ({
   pool_index: trial.query_index,
   config: trial.config,
   metrics: trial.metrics,
+  ...(trial.source ? { source: trial.source } : {}),
   replicate_count: trials.filter((item) => item.candidate_id === trial.candidate_id).length,
 }));

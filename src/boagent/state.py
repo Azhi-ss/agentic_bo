@@ -30,7 +30,7 @@ def candidate_id(config: dict[str, Any], query_index: int | None = None) -> str:
 class Trial:
     trial_id: str
     candidate_id: str
-    query_index: int
+    query_index: int | None
     config: dict[str, Any]
     status: str
     source: str = "campaign"
@@ -52,7 +52,7 @@ class Study:
     budget: int
     features: list[str]
     categories: dict[str, list[Any]]
-    initial: list[dict[str, Any]]
+    initial: list[dict[str, Any]] = field(default_factory=list)
     trials: list[Trial] = field(default_factory=list)
     event_log: list[dict[str, Any]] = field(default_factory=list)
     frame_version: int = FRAME_VERSION
@@ -65,6 +65,23 @@ class Study:
     def load(cls, path: Path) -> Study:
         raw = json.loads(path.read_text())
         raw["trials"] = [Trial(**trial) for trial in raw.get("trials", [])]
+        initial = raw.get("initial", [])
+        if initial and not any(trial.source == "historical" for trial in raw["trials"]):
+            features = raw["features"]
+            target = raw["target"]
+            raw["trials"][:0] = [
+                Trial(
+                    trial_id=f"historical-{index}",
+                    candidate_id=candidate_id({feature: row[feature] for feature in features}),
+                    query_index=None,
+                    config={feature: row[feature] for feature in features},
+                    status="observed",
+                    source="historical",
+                    metrics={target: float(row[target])},
+                )
+                for index, row in enumerate(initial)
+            ]
+            raw["initial"] = []
         return cls(**raw)
 
     def append_event(self, event_type: str, **payload: Any) -> None:
@@ -87,7 +104,7 @@ class Study:
 
     @property
     def submitted(self) -> set[int]:
-        return {trial.query_index for trial in self.trials}
+        return {trial.query_index for trial in self.trials if trial.source == "campaign" and trial.query_index is not None}
 
     @property
     def pending(self) -> list[Trial]:
@@ -95,6 +112,14 @@ class Study:
 
     @property
     def observed(self) -> list[Trial]:
+        return [trial for trial in self.trials if trial.status == "observed" and trial.source == "campaign"]
+
+    @property
+    def historical(self) -> list[Trial]:
+        return [trial for trial in self.trials if trial.status == "observed" and trial.source == "historical"]
+
+    @property
+    def all_observed(self) -> list[Trial]:
         return [trial for trial in self.trials if trial.status == "observed"]
 
     def trial(self, trial_id: str) -> Trial:

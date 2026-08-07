@@ -56,9 +56,9 @@ def fit_surrogate(study: Study, candidates: pd.DataFrame) -> FittedSurrogate:
     for item in study.initial:
         rows.append({feature: item[feature] for feature in study.features})
         values.append(sign * float(item[study.target]))
-    for trial in study.observed:
+    for trial in study.all_observed:
         rows.append(trial.config)
-        values.append(sign * float(trial.metrics[study.target]))
+        values.append(sign * float((trial.metrics or {})[study.target]))
     train_x = encode_frame(pd.DataFrame(rows), study)
     train_y = torch.tensor(values, dtype=DTYPE).unsqueeze(-1)
     model = _fit_surrogate_model(train_x, train_y)
