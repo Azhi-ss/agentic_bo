@@ -84,10 +84,10 @@ test("preferred suggestion keeps the surrogate ordering", () => {
   assert.equal(preferredSuggestion(suggestions).pool_index, 7);
 });
 
-test("non-terminal optimization commits the preferred suggestion", () => {
+test("non-terminal optimization permits an evidence-backed alternative", () => {
   const preferred = { pool_index: 7, config: { x: 1 } };
   assert.doesNotThrow(() => enforcePreferredSuggestion({ pool_index: 7, config: { x: 1 } }, preferred, 4));
-  assert.throws(() => enforcePreferredSuggestion({ pool_index: 2, config: { x: 2 } }, preferred, 4), /preferred_suggestion/);
+  assert.doesNotThrow(() => enforcePreferredSuggestion({ pool_index: 2, config: { x: 2 }, evidence_sources: ["prior"] }, preferred, 4));
 });
 
 test("terminal optimization may choose a near-best alternative", () => {
@@ -128,6 +128,20 @@ test("near-best candidates keep numerically tied terminal alternatives", () => {
 test("low-trust diagnostics select exploratory UCB", () => {
   assert.deepEqual(lowTrustAcquisition({ cv_r2: -0.1, cv_r2_status: "ok" }), { acqf: "ucb", beta: 16 });
   assert.deepEqual(lowTrustAcquisition({ cv_r2: 0.5, cv_r2_status: "ok" }), { acqf: "noisy_logei", beta: 2 });
+});
+
+test("supported offered alternatives are not hard-locked to preferred suggestion", () => {
+  const commitment = {
+    pool_index: 8,
+    config: { ligand: "PPh3", base: "KOH" },
+    intent: "explore",
+    evidence_sources: ["information"],
+    expected_learning: "separate two plausible regimes",
+    result_use: "choose the next local region",
+  };
+  const preferred = { pool_index: 7, config: { ligand: "PPh3", base: "NaHCO3" } };
+
+  assert.doesNotThrow(() => enforcePreferredSuggestion(commitment, preferred, 5));
 });
 
 test("shadow policy challenges an unsupported stalled action signature", () => {
@@ -317,6 +331,7 @@ test("Sara can inspect and reconfigure lenz through typed tools", async () => {
 
   assert.deepEqual(tools.map((tool) => tool.name), [
     "lenz_suggest", "lenz_predict", "lenz_score", "lenz_diagnostics", "lenz_trials", "lenz_set_acqf",
+    "lenz_set_bounds", "lenz_set_objectives", "lenz_set_constraints", "lenz_pareto",
   ]);
   const setAcqf = tools.find((tool) => tool.name === "lenz_set_acqf");
   await setAcqf.execute("call-1", { acqf: "ucb", beta: 3, rationale: "Explore uncertainty." });

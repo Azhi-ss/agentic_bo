@@ -100,6 +100,55 @@ class LenzCliContractTest(unittest.TestCase):
             self.assertEqual(migrated.initial, [])
             self.assertEqual(migrated.historical[0].metrics, {"Yield": 80.0})
 
+    def test_load_migrates_legacy_objective_and_initializes_domain_config(self) -> None:
+        with TemporaryDirectory() as directory:
+            state = create_state(Path(directory))
+
+            study = Study.load(state)
+
+            self.assertEqual(study.objectives, {"Yield": "maximize"})
+            self.assertEqual(study.constraints, [])
+            self.assertEqual(study.original_domain, study.categories)
+            self.assertEqual(study.active_bounds, {})
+
+    def test_feasible_incumbent_and_pareto_use_configured_outcomes(self) -> None:
+        with TemporaryDirectory() as directory:
+            state = create_state(Path(directory))
+            study = Study.load(state)
+            study.objectives = {"Yield": "maximize", "Cost": "minimize"}
+            study.constraints = [{"metric": "Cost", "upper": 10.0}]
+            study.trials[0].metrics = {"Yield": 80.0, "Cost": 5.0}
+            study.trials[1].metrics = {"Yield": 90.0, "Cost": 9.0}
+            study.save(state)
+
+            incumbent = runner.invoke(app, ["incumbent", "--state", str(state)])
+            front = runner.invoke(app, ["pareto", "--state", str(state)])
+
+            self.assertEqual(json.loads(incumbent.output)["result"]["metrics"], {"Yield": 90.0, "Cost": 9.0})
+            self.assertEqual(len(json.loads(front.output)["result"]), 2)
+
+    def test_persistent_and_temporary_steering_and_multiple_pending(self) -> None:
+        with TemporaryDirectory() as directory:
+            state = create_state(Path(directory))
+
+            for command in (
+                ["set-bounds", "--state", str(state), "--bounds", '{"ligand":["PPh3"]}', "--rationale", "trusted ligand"],
+                ["set-objectives", "--state", str(state), "--objectives", '{"Yield":"maximize"}', "--rationale", "confirm objective"],
+                ["set-constraints", "--state", str(state), "--constraints", '[]', "--rationale", "no constraints"],
+            ):
+                result = runner.invoke(app, command)
+                self.assertEqual(result.exit_code, 0, result.output)
+
+            temporary = runner.invoke(app, ["suggest", "--state", str(state), "--bounds", '{"base":["KOH"]}', "--q", "2"])
+            self.assertEqual(temporary.exit_code, 0, temporary.output)
+            self.assertTrue(all(row["config"]["ligand"] == "PPh3" and row["config"]["base"] == "KOH" for row in json.loads(temporary.output)["result"]))
+
+            first = runner.invoke(app, ["submit", "--state", str(state), "--pool-index", "0", "--config", '{"ligand":"PPh3","base":"KOH"}', "--request-id", "request-1"])
+            second = runner.invoke(app, ["submit", "--state", str(state), "--pool-index", "1", "--config", '{"ligand":"XPhos","base":"NaHCO3"}', "--request-id", "request-2"])
+            self.assertEqual(first.exit_code, 0, first.output)
+            self.assertEqual(second.exit_code, 0, second.output)
+            self.assertEqual(len(Study.load(state).pending), 2)
+
     def test_score_defaults_to_persisted_policy_and_records_revision_audit(self) -> None:
         with TemporaryDirectory() as directory:
             state = create_state(Path(directory))

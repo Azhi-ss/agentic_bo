@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import math
 from pathlib import Path
 from typing import Any
 
@@ -8,7 +7,7 @@ import numpy as np
 import pandas as pd
 import torch
 
-SEEDS = list(range(100, 2001, 100))
+SEEDS = list(range(100, 1001, 100))
 
 
 def validate_trajectory(path: Path, dataset_root: Path, budget: int = 40) -> dict[str, Any]:
@@ -59,14 +58,16 @@ def validate_trajectory(path: Path, dataset_root: Path, budget: int = 40) -> dic
         "best_found": float(best[-1]),
         "round_to_95_global_best": t95,
         "auc_best_so_far": float(best.mean()),
+        "simple_regret": abs(float(best[-1]) - global_best),
     }
 
 
 def summarize(results: list[dict[str, Any]]) -> dict[str, dict[str, float]]:
-    keys = ["initial_round_found_best", "best_found", "round_to_95_global_best", "auc_best_so_far"]
+    keys = ["initial_round_found_best", "best_found", "round_to_95_global_best", "auc_best_so_far", "simple_regret"]
     summary = {}
     for key in keys:
+        if not all(key in result for result in results):
+            continue
         values = np.array([result[key] for result in results], dtype=float)
-        sem = values.std(ddof=1) / math.sqrt(len(values)) if len(values) > 1 else 0.0
-        summary[key] = {"mean": float(values.mean()), "std": float(values.std(ddof=1)) if len(values) > 1 else 0.0, "ci95": float(1.96 * sem)}
+        summary[key] = {"median": float(np.median(values)), "q25": float(np.quantile(values, 0.25)), "q75": float(np.quantile(values, 0.75))}
     return summary

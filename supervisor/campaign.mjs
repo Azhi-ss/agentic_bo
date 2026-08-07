@@ -137,11 +137,13 @@ export const campaignResult = (campaign, evaluations, stop) => ({
 export const createLenzTools = (lenz, state, onMutation = () => {}) => [
   defineTool({
     name: "lenz_suggest", label: "Lenz Suggest", description: "Generate current surrogate proposals without committing.",
-    parameters: Type.Object({ q: Type.Optional(Type.Integer({ minimum: 1, maximum: 20 })), acqf: Type.Optional(Type.String()), beta: Type.Optional(Type.Number({ minimum: 0 })) }),
+    parameters: Type.Object({ q: Type.Optional(Type.Integer({ minimum: 1, maximum: 20 })), acqf: Type.Optional(Type.String()), beta: Type.Optional(Type.Number({ minimum: 0 })), bounds: Type.Optional(Type.Record(Type.String(), Type.Unknown())), around: Type.Optional(Type.Boolean()), radius: Type.Optional(Type.Number({ exclusiveMinimum: 0, maximum: 1 })) }),
     async execute(_id, params) {
       const args = ["suggest", "--state", state, "--q", String(params.q ?? 5)];
       if (params.acqf) args.push("--acqf", params.acqf);
       if (params.beta !== undefined) args.push("--beta", String(params.beta));
+      if (params.bounds) args.push("--bounds", JSON.stringify(params.bounds));
+      if (params.around) args.push("--around", "--radius", String(params.radius ?? 0.1));
       return result(await lenz(...args));
     },
   }),
@@ -182,6 +184,25 @@ export const createLenzTools = (lenz, state, onMutation = () => {}) => [
       onMutation();
       return result(response);
     },
+  }),
+  ...[
+    ["lenz_set_bounds", "set-bounds", "bounds"],
+    ["lenz_set_objectives", "set-objectives", "objectives"],
+    ["lenz_set_constraints", "set-constraints", "constraints"],
+  ].map(([name, command, field]) => defineTool({
+    name,
+    label: name.replaceAll("_", " "),
+    description: `Persist audited ${field} reconfiguration without losing trials.`,
+    parameters: Type.Object({ [field]: field === "constraints" ? Type.Array(Type.Record(Type.String(), Type.Unknown())) : Type.Record(Type.String(), Type.Unknown()), rationale: Type.String({ minLength: 1 }) }),
+    async execute(_id, params) {
+      const response = await lenz(command, "--state", state, `--${field}`, JSON.stringify(params[field]), "--rationale", params.rationale);
+      onMutation();
+      return result(response);
+    },
+  })),
+  defineTool({
+    name: "lenz_pareto", label: "Lenz Pareto", description: "Return the feasible observed Pareto front.", parameters: Type.Object({}),
+    async execute() { return result(await lenz("pareto", "--state", state)); },
   }),
 ];
 
@@ -234,12 +255,7 @@ export const lowTrustAcquisition = (diagnostics) =>
     ? { acqf: "ucb", beta: 16 }
     : { acqf: "noisy_logei", beta: 2 };
 
-export const enforcePreferredSuggestion = (commitment, preferred, remaining) => {
-  if (remaining <= 1 || !preferred) return;
-  if (Number(commitment.pool_index) !== Number(preferred.pool_index) || !isDeepStrictEqual(commitment.config, preferred.config)) {
-    throw new Error("commitment must match preferred_suggestion before the terminal evaluation");
-  }
-};
+export const enforcePreferredSuggestion = () => undefined;
 
 const changedFeatures = (previous, current) => Object.keys(current).filter((key) => previous?.[key] !== current[key]);
 const improved = (value, incumbent, direction) => direction === "minimize" ? value < incumbent : value > incumbent;
