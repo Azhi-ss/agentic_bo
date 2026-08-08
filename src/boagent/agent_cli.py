@@ -13,14 +13,17 @@ from pathlib import Path
 import torch
 import pandas as pd
 import typer
+from dotenv import load_dotenv
 
 from .state import Study
 
 app = typer.Typer(add_completion=False, no_args_is_help=True)
 
 def project_env() -> dict[str, str]:
+    project_root = Path(__file__).resolve().parents[2]
+    load_dotenv(project_root / ".env", override=False)
     env = os.environ.copy()
-    project_scripts = Path(__file__).resolve().parents[2] / ".venv" / "bin"
+    project_scripts = project_root / ".venv" / "bin"
     candidates = [Path(sys.executable).resolve().parent]
     if project_scripts.is_dir():
         candidates.append(project_scripts)

@@ -298,9 +298,14 @@ class LenzCliContractTest(unittest.TestCase):
 
     def test_run_exposes_project_cli_scripts_to_supervisor(self) -> None:
         with TemporaryDirectory() as directory:
-            campaign = Path(directory)
+            root = Path(directory)
+            campaign = root / "campaign"
+            campaign.mkdir()
             (campaign / ".receipt-key").write_text("secret")
+            (root / ".env").write_text("OPENAI_API_KEY=dotenv-test-value\n")
+            module_path = root / "src" / "boagent" / "agent_cli.py"
             with (
+                patch("boagent.agent_cli.__file__", str(module_path)),
                 patch.dict("boagent.agent_cli.os.environ", {"PATH": "/usr/bin"}, clear=True),
                 patch("boagent.agent_cli.subprocess.run") as process,
             ):
@@ -309,6 +314,17 @@ class LenzCliContractTest(unittest.TestCase):
             self.assertEqual(result.exit_code, 0, result.output)
             env = process.call_args.kwargs["env"]
             self.assertEqual(Path(env["PATH"].split(os.pathsep)[0]), Path(sys.executable).resolve().parent)
+            self.assertEqual(env["OPENAI_API_KEY"], "dotenv-test-value")
+
+            with (
+                patch("boagent.agent_cli.__file__", str(module_path)),
+                patch.dict("boagent.agent_cli.os.environ", {"PATH": "/usr/bin", "OPENAI_API_KEY": "exported-test-value"}, clear=True),
+                patch("boagent.agent_cli.subprocess.run") as process,
+            ):
+                result = runner.invoke(agent_app, ["run", "--campaign", str(campaign)])
+
+            self.assertEqual(result.exit_code, 0, result.output)
+            self.assertEqual(process.call_args.kwargs["env"]["OPENAI_API_KEY"], "exported-test-value")
 
     def test_init_exposes_project_cli_scripts(self) -> None:
         with TemporaryDirectory() as directory:

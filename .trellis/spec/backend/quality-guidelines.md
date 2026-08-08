@@ -124,6 +124,25 @@ cv_r2 is negative; GP rank 1 is best, so accept it.
 surrogate_trust=low; search_mode=targeted_exploration. The verified/high-yield local region and domain prior independently support this Candidate; GP rank is advisory within that region.
 ```
 
+#### Campaign Provider Environment
+
+- `boagent init` and `boagent run` build subprocess environments through `src/boagent/agent_cli.py::project_env()`.
+- `project_env()` loads the repository-root `.env` with `load_dotenv(..., override=False)` before copying `os.environ`; an explicitly exported environment variable always wins over `.env`.
+- Project `.pi/models.json` resolves the `ai-modeling` credential from `$OPENAI_API_KEY`. OMP provider configuration under `~/.omp/agent/models.yml` is a separate store and is not automatically visible to the embedded Pi `ModelRuntime`.
+- Tests must prove both `.env` fallback and exported-variable precedence using synthetic values only. Never print or snapshot a real credential.
+
+##### Wrong
+
+```text
+Assume OMP's configured ai-modeling key is automatically inherited by boagent's embedded Pi runtime.
+```
+
+##### Correct
+
+```text
+Load repo .env without override, copy the resulting environment, and pass it explicitly to the Supervisor subprocess.
+```
+
 ### 7. Wrong vs Correct
 
 #### Wrong
