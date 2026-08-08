@@ -1,0 +1,29 @@
+{
+  "id": "autonomous-agent-bo-experiment",
+  "name": "autonomous-agent-bo-experiment",
+  "title": "Autonomous Agent BO experiment",
+  "description": "",
+  "status": "in_progress",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "Zorya",
+  "assignee": "Zorya",
+  "createdAt": "2026-08-08",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {
+    "prior_provenance": "mechanism_or_pre_experiment_source",
+    "diagnostic_task": "08-08-compare-first-step-lm-ucb"
+  }
+}

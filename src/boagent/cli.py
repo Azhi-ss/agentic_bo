@@ -167,6 +167,50 @@ def create(
         emit(command, error=str(exc))
         raise typer.Exit(1) from exc
 
+@app.command()
+def candidates(
+    state: Path = typer.Option(...),
+    filters: str | None = typer.Option(None),
+    cursor: int = typer.Option(0, min=0),
+    limit: int = typer.Option(20, min=1, max=100),
+) -> None:
+    command = "candidates"
+    try:
+        study = load_state(state)
+        candidates = load_candidates(study)
+        frame = candidates
+        restrictions = parse_json_object(filters, "filters") if filters else {}
+        for feature, allowed in restrictions.items():
+            if feature not in study.features:
+                raise ValueError(f"unknown filter feature: {feature}")
+            values = allowed if isinstance(allowed, list) else [allowed]
+            if not values:
+                raise ValueError(f"filter values must not be empty: {feature}")
+            legal = candidates[feature].drop_duplicates().tolist()
+            if any(value not in legal for value in values):
+                raise ValueError(f"illegal filter value for {feature}")
+            frame = frame[frame[feature].isin(values)]
+        total = len(frame)
+        page = frame.iloc[cursor:cursor + limit]
+        rows = [
+            {
+                "pool_index": int(index),
+                "candidate_id": candidate_id(config_at(candidates, int(index), study.features), int(index)),
+                "config": config_at(candidates, int(index), study.features),
+            }
+            for index in page.index
+        ]
+        next_cursor = cursor + len(rows)
+        emit(command, {
+            "total_matching": total,
+            "cursor": cursor,
+            "next_cursor": next_cursor if next_cursor < total else None,
+            "candidates": rows,
+        }, study=study)
+    except Exception as exc:
+        emit(command, error=str(exc))
+        raise typer.Exit(1) from exc
+
 
 @app.command()
 def suggest(
@@ -448,8 +492,19 @@ def score(
         fitted = fit_surrogate(study, candidates)
         x = encode_frame(candidates.loc[indices, study.features], study)
         name = acqf or study.acqf
-        values = acquisition_values(fitted, x, name, beta if beta is not None else study.beta)
-        emit(command, [{"candidate_id": candidate_id(config), "config": config, name: float(value)} for config, value in zip(parsed, values, strict=True)], study=study)
+        selected_beta = beta if beta is not None else study.beta
+        values = acquisition_values(fitted, x, name, selected_beta)
+        mean, variance = posterior_rows(fitted, x, study.direction)
+        emit(command, [{
+            "candidate_id": candidate_id(config, index),
+            "pool_index": index,
+            "config": config,
+            "posterior_mean": float(mu),
+            "posterior_variance": float(var),
+            "acquisition_value": float(value),
+            "acqf": name,
+            name: float(value),
+        } for index, config, mu, var, value in zip(indices, parsed, mean, variance, values, strict=True)], study=study)
     except Exception as exc:
         emit(command, error=str(exc))
         raise typer.Exit(1) from exc

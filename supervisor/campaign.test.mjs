@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { acquisitionScore, campaignResult, createCampaignActionTools, createLenzTools, enforcePreferredSuggestion, lowTrustAcquisition, nearBestCandidates, optimizationPolicy, preferredSuggestion, promptWithTransientRetries, reconcileTrajectory, replayOptimizationPolicy, requireCampaignAction, requireOk, requirePolicyAllowance, requireReceipt, validateCampaignStatus, verifyCommitment, verifiedTrialFacts, verifyOptimizationPolicy, verifyStop } from "./campaign.mjs";
+import { acquisitionScore, autonomousSystemPrompt, campaignResult, createCampaignActionTools, createLenzTools, enforcePreferredSuggestion, leakagePreflight, lowTrustAcquisition, nearBestCandidates, optimizationPolicy, preferredSuggestion, promptWithTransientRetries, reconcileTrajectory, replayOptimizationPolicy, requireCampaignAction, requireOk, requirePolicyAllowance, requireReceipt, sanitizeAutonomousContext, validateCampaignStatus, validateDecisionEvidence, verifyCommitment, verifiedTrialFacts, verifyOptimizationPolicy, verifyStop } from "./campaign.mjs";
 
 const offered = [{
   candidate_id: "candidate-a",
@@ -142,6 +142,65 @@ test("supported offered alternatives are not hard-locked to preferred suggestion
   const preferred = { pool_index: 7, config: { ligand: "PPh3", base: "NaHCO3" } };
 
   assert.doesNotThrow(() => enforcePreferredSuggestion(commitment, preferred, 5));
+});
+
+test("autonomous profile has standalone non-GP-first instructions", () => {
+  assert.match(autonomousSystemPrompt, /own the final optimization decision/i);
+  assert.match(autonomousSystemPrompt, /non-binding advice/i);
+  assert.doesNotMatch(autonomousSystemPrompt, /preferred_suggestion|GP rank 1|beta=16/i);
+});
+
+test("autonomous context allowlist excludes paths and ranked proposals", () => {
+  const context = sanitizeAutonomousContext({
+    state_revision: 2,
+    status: { campaign_id: "c", target: "Yield", direction: "maximize", acqf: "noisy_logei", beta: 2, budget: 2, historical_observed: 3, observed: 0, pending: [], budget_remaining: 2, remaining: 10, public_root: "/secret" },
+    dataset_summary: { rows: { candidate_pool: 10 } },
+  });
+  assert.equal(context.status.acqf, "noisy_logei");
+  assert.equal(context.status.public_root, undefined);
+  assert.equal(context.suggestions, undefined);
+  assert.equal(context.preferred_suggestion, undefined);
+});
+
+test("autonomous tools omit permanent domain mutation and early stop", () => {
+  const actions = createCampaignActionTools(() => {}, { autonomous: true }).map((tool) => tool.name);
+  const tools = createLenzTools(async () => ({ ok: true, result: [] }), "state", () => {}, () => {}, { autonomous: true }).map((tool) => tool.name);
+  assert.deepEqual(actions, ["commit_candidate"]);
+  assert.ok(tools.includes("lenz_candidates"));
+  assert.ok(tools.includes("lenz_set_acqf"));
+  assert.ok(!tools.some((name) => ["lenz_set_bounds", "lenz_set_objectives", "lenz_set_constraints"].includes(name)));
+});
+
+test("Decision Evidence Record matches actual surrogate use", () => {
+  const base = { pool_index: 7, config: offered[0].config, hypothesis: "plausible chemistry", evidence_sources: ["domain_prior"], expected_outcome: "higher yield", expected_learning: "updates next choice", rationale: "best current tradeoff" };
+  assert.equal(validateDecisionEvidence({ ...base, surrogate_relationship: "not_consulted" }, { calls: [] }).decision_evidence_complete, true);
+  assert.equal(validateDecisionEvidence({ ...base, surrogate_relationship: "accept" }, { calls: ["lenz_suggest"], proposals: offered }).actual_tool_use.ranked_proposals_consulted, true);
+  assert.throws(() => validateDecisionEvidence({ ...base, surrogate_relationship: "not_consulted" }, { calls: ["lenz_score"] }), /informed_without_proposal/);
+});
+
+test("candidate inspection enforces 500 returned rows per step", async () => {
+  const response = { ok: true, result: { candidates: Array.from({ length: 100 }, (_, pool_index) => ({ pool_index })) } };
+  const tools = createLenzTools(async () => response, "state", () => {}, () => {}, { autonomous: true });
+  const candidates = tools.find((tool) => tool.name === "lenz_candidates");
+  for (let call = 0; call < 5; call += 1) await candidates.execute("id", { limit: 100 });
+  await assert.rejects(() => candidates.execute("id", { limit: 1 }), /500 returned rows/);
+  tools.resetStep();
+  await assert.doesNotReject(() => candidates.execute("id", { limit: 1 }));
+});
+
+test("tool evidence records only successful lenz results", async () => {
+  const evidence = [];
+  const tools = createLenzTools(async (command) => command === "predict" ? { ok: false, error: "invalid candidate" } : { ok: true, result: [] }, "state", () => {}, (name) => evidence.push(name), { autonomous: true });
+  await tools.find((tool) => tool.name === "lenz_predict").execute("id", { configs: [{ ligand: "invalid" }] });
+  await tools.find((tool) => tool.name === "lenz_suggest").execute("id", {});
+  assert.deepEqual(evidence, ["lenz_suggest"]);
+});
+
+test("leakage preflight fails closed on forbidden context or enabled resources", () => {
+  const good = { prompt: autonomousSystemPrompt, toolNames: ["lenz_candidates"], context: { status: {} }, runtime: { noTools: "builtin", noExtensions: true, noSkills: true, noPromptTemplates: true, noContextFiles: true }, prior: { prior_hash: "hash", prior_source: "PRIOR.md", prior_scan: "label_free", prior_provenance: "mechanism_or_pre_experiment_source" } };
+  assert.equal(leakagePreflight(good).passed, true);
+  assert.throws(() => leakagePreflight({ ...good, context: { dataset_root: "/tmp/data" } }), /leakage preflight failed/);
+  assert.throws(() => leakagePreflight({ ...good, runtime: { ...good.runtime, noSkills: false } }), /runtime_resources_enabled/);
 });
 
 test("shadow policy challenges an unsupported stalled action signature", () => {

@@ -52,6 +52,24 @@ class LenzCliContractTest(unittest.TestCase):
                 self.assertEqual(result.exit_code, 0, result.output)
                 self.assertIn('"ok": true', result.output)
 
+    def test_candidates_are_label_free_filtered_and_paginated(self) -> None:
+        with TemporaryDirectory() as directory:
+            state = create_state(Path(directory))
+            first = runner.invoke(app, ["candidates", "--state", str(state), "--filters", '{"ligand":["PPh3","XPhos"]}', "--limit", "1"])
+            second = runner.invoke(app, ["candidates", "--state", str(state), "--cursor", "1", "--limit", "100"])
+
+            self.assertEqual(first.exit_code, 0, first.output)
+            page = json.loads(first.output)["result"]
+            self.assertEqual(set(page["candidates"][0]), {"pool_index", "candidate_id", "config"})
+            self.assertEqual(page["candidates"][0]["pool_index"], 0)
+            self.assertEqual(page["next_cursor"], 1)
+            self.assertEqual(json.loads(second.output)["result"]["candidates"][0]["pool_index"], 1)
+
+            invalid = runner.invoke(app, ["candidates", "--state", str(state), "--filters", '{"ligand":"hidden"}'])
+            too_large = runner.invoke(app, ["candidates", "--state", str(state), "--limit", "101"])
+            self.assertNotEqual(invalid.exit_code, 0)
+            self.assertNotEqual(too_large.exit_code, 0)
+
     def test_create_exposes_historical_observations_without_spending_campaign_budget(self) -> None:
         with TemporaryDirectory() as directory:
             state = create_state(Path(directory))
@@ -187,6 +205,7 @@ class LenzCliContractTest(unittest.TestCase):
                 patch("boagent.cli.fit_surrogate", return_value=object()),
                 patch("boagent.cli.encode_frame", return_value=object()),
                 patch("boagent.cli.acquisition_values", return_value=[1.25]) as acquisition,
+                patch("boagent.cli.posterior_rows", return_value=([81.0], [4.0])),
             ):
                 scored = runner.invoke(app, [
                     "score", "--state", str(state),
@@ -196,6 +215,36 @@ class LenzCliContractTest(unittest.TestCase):
             acquisition.assert_called_once_with(ANY, ANY, "ucb", 3.0)
             self.assertIn('"ucb": 1.25', scored.output)
 
+            payload = json.loads(scored.output)["result"][0]
+            self.assertEqual(payload["pool_index"], 0)
+            self.assertEqual(payload["config"], {"ligand": "PPh3", "base": "KOH"})
+            self.assertEqual(payload["posterior_mean"], 81.0)
+            self.assertEqual(payload["posterior_variance"], 4.0)
+            self.assertEqual(payload["acquisition_value"], 1.25)
+            self.assertEqual(payload["acqf"], "ucb")
+
+    def test_run_forwards_autonomous_profile_without_changing_default(self) -> None:
+        with TemporaryDirectory() as directory:
+            campaign = Path(directory)
+            (campaign / ".receipt-key").write_text("secret")
+            with patch("boagent.agent_cli.subprocess.run") as process:
+                default = runner.invoke(agent_app, ["run", "--campaign", str(campaign)])
+                autonomous = runner.invoke(agent_app, ["run", "--campaign", str(campaign), "--policy", "autonomous_agent"])
+
+            self.assertEqual(default.exit_code, 0, default.output)
+            self.assertEqual(autonomous.exit_code, 0, autonomous.output)
+            default_command, autonomous_command = [call.args[0] for call in process.call_args_list]
+            self.assertNotIn("--policy", default_command)
+            self.assertEqual(autonomous_command[-2:], ["--policy", "autonomous_agent"])
+
+    def test_run_rejects_unknown_experiment_policy(self) -> None:
+        with TemporaryDirectory() as directory:
+            campaign = Path(directory)
+            (campaign / ".receipt-key").write_text("secret")
+            result = runner.invoke(agent_app, ["run", "--campaign", str(campaign), "--policy", "unknown"])
+            self.assertNotEqual(result.exit_code, 0)
+            self.assertIn("default", result.output)
+            self.assertIn("autonomous_agent", result.output)
     def test_diagnostics_reuses_the_same_state_revision(self) -> None:
         with TemporaryDirectory() as directory:
             state = create_state(Path(directory))
@@ -303,6 +352,11 @@ class LenzCliContractTest(unittest.TestCase):
             self.assertEqual(summary["features"]["product"]["role"], "context")
             self.assertEqual(summary["features"]["temperature"]["kind"], "numeric_discrete")
             self.assertEqual(summary["target"]["initial_observed"]["maximum"], 70.0)
+            manifest = json.loads((root / "campaign" / "manifest.json").read_text())
+            self.assertEqual(manifest["prior_source"], "PRIOR.md")
+            self.assertEqual(manifest["prior_scan"], "label_free")
+            self.assertEqual(manifest["prior_provenance"], "mechanism_or_pre_experiment_source")
+            self.assertEqual(len(manifest["prior_hash"]), 64)
             self.assertNotIn("test.csv", task)
 
     def test_init_rejects_misaligned_dataset_schema(self) -> None:

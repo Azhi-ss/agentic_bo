@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import secrets
@@ -67,6 +68,9 @@ def init(
         raise typer.BadParameter("train/test_features schema mismatch")
     output.mkdir(parents=True, exist_ok=False)
     campaign_id = str(uuid.uuid4())
+    prior_path = dataset_root / "PRIOR.md"
+    prior_text = prior_path.read_text(encoding="utf-8").strip() if prior_path.exists() else ""
+    forbidden_prior_terms = ("test.csv", "global_best", "hidden rank", "hidden outcome")
     manifest = {
         "campaign_id": campaign_id,
         "dataset_root": str(dataset_root),
@@ -74,6 +78,10 @@ def init(
         "budget": budget,
         "target": target,
         "direction": direction,
+        "prior_hash": hashlib.sha256(prior_text.encode()).hexdigest(),
+        "prior_source": "PRIOR.md",
+        "prior_scan": "label_free" if not any(term in prior_text.lower() for term in forbidden_prior_terms) else "failed",
+        "prior_provenance": "mechanism_or_pre_experiment_source",
     }
     (output / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2))
     options = json.loads((dataset_root / "options.json").read_text())
@@ -84,13 +92,12 @@ def init(
         summary_json = json.dumps(summary, ensure_ascii=False, indent=2)
         (output / "dataset-summary.json").write_text(summary_json)
         summary_note = f"\n\n## Dataset understanding\n\n```json\n{summary_json}\n```"
-    prior_path = dataset_root / "PRIOR.md"
     domain_context = (
         "Use domain priors to compare exact public Candidates. You may inspect and reconfigure lenz through the typed tools exposed by the Campaign Supervisor. "
         "Only identical candidate_id values are Replicates; Experiment Receipts are the sole source of new Outcomes."
     )
-    if prior_path.exists():
-        domain_context += "\n\n" + prior_path.read_text(encoding="utf-8").strip()
+    if prior_text:
+        domain_context += "\n\n" + prior_text
     (output / "TASK.md").write_text(
         "# Optimization Task\n\n"
         f"Optimize `{target}` with direction `{direction}` using {budget} sequential black-box evaluations. "
@@ -119,7 +126,10 @@ def run(
     campaign: Path = typer.Option(...),
     model: str = typer.Option("gpt-5.6-sol"),
     thinking: str = typer.Option("xhigh"),
+    policy: str = typer.Option("default", help="Campaign profile: default or autonomous_agent."),
 ) -> None:
+    if policy not in {"default", "autonomous_agent"}:
+        raise typer.BadParameter("policy must be one of: default, autonomous_agent")
     campaign = campaign.resolve()
     env = project_env()
     key_path = campaign / ".receipt-key"
@@ -133,7 +143,10 @@ def run(
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError as exc:
             raise typer.BadParameter("campaign is already running") from exc
-        subprocess.run(["npm", "run", "run", "--", "--campaign", str(campaign), "--model", model, "--thinking", thinking], cwd=supervisor, env=env, check=True)
+        command = ["npm", "run", "run", "--", "--campaign", str(campaign), "--model", model, "--thinking", thinking]
+        if policy != "default":
+            command.extend(["--policy", policy])
+        subprocess.run(command, cwd=supervisor, env=env, check=True)
 
 
 @app.command()

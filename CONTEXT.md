@@ -239,3 +239,15 @@ _Avoid_: Observation
 **Verified Campaign Summary**:
 The Supervisor-generated factual report derived from the Frame, Experiment Receipts, revisions, and archived artifacts.
 _Avoid_: Sara report
+
+**Autonomous Deliberation**:
+A Deliberation in which Sara chooses which public evidence and Surrogate Advice to consult, then owns the final Commitment without a default obligation to accept the top-ranked Proposal.
+_Avoid_: Surrogate-free decision, random override
+
+**Candidate Inspection**:
+A read-only examination of legal Candidates and their public parameter configurations without access to Oracle Outcomes, hidden benchmark ranks, or label-derived statistics.
+_Avoid_: Oracle lookup, candidate evaluation
+
+**Decision Evidence Record**:
+The structured account of Sara's hypothesis, consulted evidence, expected learning or improvement value, relationship to Surrogate Advice, and final rationale for a Commitment.
+_Avoid_: Observation, proof of optimality

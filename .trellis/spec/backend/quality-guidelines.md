@@ -49,3 +49,64 @@ Questions to answer:
 <!-- What reviewers should check -->
 
 (To be filled by the team)
+
+
+## Scenario: Autonomous Campaign Profiles
+
+### 1. Scope / Trigger
+
+- Trigger: a campaign adds a selectable Supervisor profile or exposes new label-free candidate/evidence fields across Python, Node, and reporting.
+- Keep omitted `--policy` behavior identical to `default`; experimental profiles must be explicit.
+
+### 2. Signatures
+
+- `boagent run --campaign <path> [--model <id>] [--thinking <level>] [--policy default|autonomous_agent]`
+- `lenz candidates --state <path> [--filters <json>] [--cursor <int>] [--limit <1..100>]`
+- `lenz score --state <path> --configs <json> [--acqf <name>] [--beta <number>]`
+
+### 3. Contracts
+
+- `candidates` reads only `test_features.csv`, preserves original pool order, accepts exact legal scalar/list filters, and returns only pagination plus `pool_index`, exact `candidate_id`, and `config`.
+- Autonomous Candidate Inspection returns at most 100 rows per call and 500 rows per Campaign Step; failed calls do not count as successful evidence.
+- Autonomous prompts and initial context use explicit allowlists: no persisted manifest spreading, dataset paths, labels, ranked initial proposals, or full historical rows.
+- The leakage preflight runs before model runtime creation and verifies prompt/context/tool surfaces, runtime isolation, and prior audit metadata.
+- Autonomous tools omit stop, permanent bounds, objectives, and constraints; acquisition/beta remain mutable.
+- Decision Evidence Record classification derives from successful tool results accumulated across every corrective action attempt in the current Step.
+- A transient provider retry is allowed only before any successful mutation or campaign action in that turn.
+- `campaign-run-config.json` records policy, prompt/config/code/prior hashes, prior scan/provenance, provider-generation-seed limitation, and leakage result.
+- A completed budget-2 run has two exact public Candidate decisions, two valid matching signed Receipts, a complete session/events trace, and explicit transient retry evidence when retries occurred.
+
+### 4. Validation & Error Matrix
+
+- Unknown `--policy` -> CLI/Supervisor error.
+- Unknown feature/value, invalid cursor/limit, or more than 500 returned rows in a Step -> Candidate Inspection error.
+- Candidate `pool_index`/`config` mismatch or already-observed Candidate -> rejection before submit/Oracle and no budget spend.
+- Decision Evidence Record relationship inconsistent with successful tool use -> correction retry with prior Step evidence retained.
+- Forbidden prompt/tool/context field or enabled resource surface -> fail before model runtime/provider startup.
+- Missing/mismatched/invalidly signed Receipts, incomplete trace, or trajectory length other than two -> report integrity failure.
+
+### 5. Good/Base/Bad Cases
+
+- Good: Sara inspects any public evidence she chooses, commits an exact unobserved Candidate with truthful evidence classification, incorporates Receipt 1, then completes Step 2.
+- Base: omit `--policy`; the existing Paper Prompt, automatic low-trust acquisition switch, and stop semantics remain active.
+- Bad: reset evidence after a rejected action, count a failed tool result as consulted evidence, infer a Candidate identity, silently fall back to a GP proposal, or report unsigned/incomplete evidence as successful.
+
+### 6. Tests Required
+
+- Python: exact Candidate filtering/identity, omitted/default policy, prior metadata, report trace/retry/integrity extraction, and incomplete evidence rejection.
+- Node: standalone prompt/context allowlist, autonomous tool surface, 500-row reset, successful evidence tracking across correction attempts, retry mutation barrier, and leakage fail-closed behavior.
+- Smoke: run/export a budget-2 autonomous campaign only after preflight, then validate the exported trajectory against the public dataset.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```text
+The model used score in an earlier rejected attempt, but the final trajectory says not_consulted because per-attempt evidence was reset.
+```
+
+#### Correct
+
+```text
+Successful Step evidence accumulates until a valid Commitment, and reporting cross-checks the complete session trace and signed Receipts.
+```

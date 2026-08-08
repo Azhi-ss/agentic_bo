@@ -85,27 +85,37 @@ export const promptWithTransientRetries = async ({ prompt, messages, onPause, on
   }
 };
 
-export const createCampaignActionTools = (setAction) => [
-  defineTool({
+export const createCampaignActionTools = (setAction, { autonomous = false } = {}) => {
+  const evidence = {
+    hypothesis: Type.String({ minLength: 1 }),
+    evidence_sources: Type.Array(Type.String({ minLength: 1 }), { minItems: 1 }),
+    expected_outcome: Type.String({ minLength: 1 }),
+    expected_learning: Type.String({ minLength: 1 }),
+    surrogate_relationship: Type.Union(["accept", "override", "informed_without_proposal", "not_consulted"].map((value) => Type.Literal(value))),
+    rationale: Type.String({ minLength: 1 }),
+  };
+  const tools = [defineTool({
     name: "commit_candidate",
     label: "Commit Candidate",
     description: "Commit exactly one candidate from the current verified public candidate set.",
     parameters: Type.Object({
       pool_index: Type.Integer({ minimum: 0 }),
       config: Type.Record(Type.String(), Type.Unknown()),
-      rationale: Type.String({ minLength: 1 }),
-      intent: Type.Optional(Type.Union([Type.Literal("optimize"), Type.Literal("discriminate"), Type.Literal("explore"), Type.Literal("reconfigure")])),
-      evidence_sources: Type.Optional(Type.Array(Type.Union([Type.Literal("acquisition"), Type.Literal("prior"), Type.Literal("information"), Type.Literal("reconfiguration")]), { minItems: 1 })),
-      expected_learning: Type.Optional(Type.String({ minLength: 1 })),
-      result_use: Type.Optional(Type.String({ minLength: 1 })),
+      ...(autonomous ? evidence : {
+        rationale: Type.String({ minLength: 1 }),
+        intent: Type.Optional(Type.Union([Type.Literal("optimize"), Type.Literal("discriminate"), Type.Literal("explore"), Type.Literal("reconfigure")])),
+        evidence_sources: Type.Optional(Type.Array(Type.Union([Type.Literal("acquisition"), Type.Literal("prior"), Type.Literal("information"), Type.Literal("reconfiguration")]), { minItems: 1 })),
+        expected_learning: Type.Optional(Type.String({ minLength: 1 })),
+        result_use: Type.Optional(Type.String({ minLength: 1 })),
+      }),
     }),
     async execute(_id, params) {
       const action = { type: "commit_candidate", ...params };
       setAction(action);
       return { ...result(action), terminate: true };
     },
-  }),
-  defineTool({
+  })];
+  if (!autonomous) tools.push(defineTool({
     name: "stop_campaign",
     label: "Stop Campaign",
     description: "Stop only when one of the paper-defined stopping conditions is verified.",
@@ -118,8 +128,9 @@ export const createCampaignActionTools = (setAction) => [
       setAction(action);
       return { ...result(action), terminate: true };
     },
-  }),
-];
+  }));
+  return tools;
+};
 
 export const requireCampaignAction = (action) => {
   if (!action) throw new Error("assistant returned no explicit campaign action");
@@ -134,77 +145,78 @@ export const campaignResult = (campaign, evaluations, stop) => ({
   ...(stop ? { stop } : {}),
 });
 
-export const createLenzTools = (lenz, state, onMutation = () => {}) => [
-  defineTool({
-    name: "lenz_suggest", label: "Lenz Suggest", description: "Generate current surrogate proposals without committing.",
-    parameters: Type.Object({ q: Type.Optional(Type.Integer({ minimum: 1, maximum: 20 })), acqf: Type.Optional(Type.String()), beta: Type.Optional(Type.Number({ minimum: 0 })), bounds: Type.Optional(Type.Record(Type.String(), Type.Unknown())), around: Type.Optional(Type.Boolean()), radius: Type.Optional(Type.Number({ exclusiveMinimum: 0, maximum: 1 })) }),
-    async execute(_id, params) {
-      const args = ["suggest", "--state", state, "--q", String(params.q ?? 5)];
-      if (params.acqf) args.push("--acqf", params.acqf);
-      if (params.beta !== undefined) args.push("--beta", String(params.beta));
-      if (params.bounds) args.push("--bounds", JSON.stringify(params.bounds));
-      if (params.around) args.push("--around", "--radius", String(params.radius ?? 0.1));
-      return result(await lenz(...args));
-    },
-  }),
-  defineTool({
-    name: "lenz_predict", label: "Lenz Predict", description: "Inspect posterior mean and variance for exact public candidates.",
-    parameters: Type.Object({ configs: Type.Array(Type.Record(Type.String(), Type.Unknown()), { minItems: 1 }) }),
-    async execute(_id, params) { return result(await lenz("predict", "--state", state, "--configs", JSON.stringify(params.configs))); },
-  }),
-  defineTool({
-    name: "lenz_score", label: "Lenz Score", description: "Score exact public candidates with an acquisition policy.",
-    parameters: Type.Object({ configs: Type.Array(Type.Record(Type.String(), Type.Unknown()), { minItems: 1 }), acqf: Type.Optional(Type.String()), beta: Type.Optional(Type.Number({ minimum: 0 })) }),
-    async execute(_id, params) {
-      const args = ["score", "--state", state, "--configs", JSON.stringify(params.configs)];
-      if (params.acqf) args.push("--acqf", params.acqf);
-      if (params.beta !== undefined) args.push("--beta", String(params.beta));
-      return result(await lenz(...args));
-    },
-  }),
-  defineTool({
-    name: "lenz_diagnostics", label: "Lenz Diagnostics", description: "Inspect current surrogate diagnostics.", parameters: Type.Object({}),
-    async execute() { return result(await lenz("diagnostics", "--state", state)); },
-  }),
-  defineTool({
-    name: "lenz_trials", label: "Lenz Trials", description: "Inspect the complete observed trial log, including historical and campaign observations.", parameters: Type.Object({}),
-    async execute() { return result(await lenz("trials", "--state", state)); },
-  }),
-  defineTool({
-    name: "lenz_set_acqf", label: "Lenz Set Acquisition", description: "Persist an audited acquisition policy revision.",
-    parameters: Type.Object({
-      acqf: Type.String({ minLength: 1 }),
-      beta: Type.Optional(Type.Number({ minimum: 0 })),
-      rationale: Type.String({ minLength: 1 }),
+export const createLenzTools = (lenz, state, onMutation = () => {}, onEvidence = () => {}, { autonomous = false } = {}) => {
+  let inspectedRows = 0;
+  const tracked = (name, response) => {
+    if (response?.ok) onEvidence(name, response);
+    return result(response);
+  };
+  const tools = [
+    defineTool({
+      name: "lenz_suggest", label: "Lenz Suggest", description: "Generate current surrogate proposals without committing.",
+      parameters: Type.Object({ q: Type.Optional(Type.Integer({ minimum: 1, maximum: 20 })), acqf: Type.Optional(Type.String()), beta: Type.Optional(Type.Number({ minimum: 0 })), bounds: Type.Optional(Type.Record(Type.String(), Type.Unknown())), around: Type.Optional(Type.Boolean()), radius: Type.Optional(Type.Number({ exclusiveMinimum: 0, maximum: 1 })) }),
+      async execute(_id, params) {
+        const args = ["suggest", "--state", state, "--q", String(params.q ?? 5)];
+        if (params.acqf) args.push("--acqf", params.acqf);
+        if (params.beta !== undefined) args.push("--beta", String(params.beta));
+        if (params.bounds) args.push("--bounds", JSON.stringify(params.bounds));
+        if (params.around) args.push("--around", "--radius", String(params.radius ?? 0.1));
+        return tracked("lenz_suggest", await lenz(...args));
+      },
     }),
+    defineTool({ name: "lenz_predict", label: "Lenz Predict", description: "Inspect posterior mean and variance for exact public candidates.", parameters: Type.Object({ configs: Type.Array(Type.Record(Type.String(), Type.Unknown()), { minItems: 1 }) }), async execute(_id, params) { return tracked("lenz_predict", await lenz("predict", "--state", state, "--configs", JSON.stringify(params.configs))); } }),
+    defineTool({
+      name: "lenz_score", label: "Lenz Score", description: "Score exact public candidates with an acquisition policy.",
+      parameters: Type.Object({ configs: Type.Array(Type.Record(Type.String(), Type.Unknown()), { minItems: 1 }), acqf: Type.Optional(Type.String()), beta: Type.Optional(Type.Number({ minimum: 0 })) }),
+      async execute(_id, params) {
+        const args = ["score", "--state", state, "--configs", JSON.stringify(params.configs)];
+        if (params.acqf) args.push("--acqf", params.acqf);
+        if (params.beta !== undefined) args.push("--beta", String(params.beta));
+        const response = await lenz(...args);
+        if (response?.ok) onEvidence("lenz_score", response);
+        return result(response);
+      },
+    }),
+    defineTool({ name: "lenz_diagnostics", label: "Lenz Diagnostics", description: "Inspect current surrogate diagnostics.", parameters: Type.Object({}), async execute() { return tracked("lenz_diagnostics", await lenz("diagnostics", "--state", state)); } }),
+    defineTool({ name: "lenz_trials", label: "Lenz Trials", description: "Inspect verified historical and campaign observations.", parameters: Type.Object({}), async execute() { return tracked("lenz_trials", await lenz("trials", "--state", state)); } }),
+    defineTool({
+      name: "lenz_set_acqf", label: "Lenz Set Acquisition", description: "Persist an audited acquisition policy revision.",
+      parameters: Type.Object({ acqf: Type.String({ minLength: 1 }), beta: Type.Optional(Type.Number({ minimum: 0 })), rationale: Type.String({ minLength: 1 }) }),
+      async execute(_id, params) {
+        const args = ["set-acqf", "--state", state, "--acqf", params.acqf, "--rationale", params.rationale];
+        if (params.beta !== undefined) args.push("--beta", String(params.beta));
+        const response = await lenz(...args);
+        if (response?.ok) onMutation();
+        return tracked("lenz_set_acqf", response);
+      },
+    }),
+  ];
+  if (autonomous) tools.push(defineTool({
+    name: "lenz_candidates", label: "Lenz Candidates", description: "Inspect label-free public candidates in deterministic pool order.",
+    parameters: Type.Object({ filters: Type.Optional(Type.Record(Type.String(), Type.Unknown())), cursor: Type.Optional(Type.Integer({ minimum: 0 })), limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 100 })) }),
     async execute(_id, params) {
-      const args = ["set-acqf", "--state", state, "--acqf", params.acqf, "--rationale", params.rationale];
-      if (params.beta !== undefined) args.push("--beta", String(params.beta));
+      const args = ["candidates", "--state", state, "--cursor", String(params.cursor ?? 0), "--limit", String(params.limit ?? 20)];
+      if (params.filters) args.push("--filters", JSON.stringify(params.filters));
       const response = await lenz(...args);
-      onMutation();
+      const count = response?.ok && Array.isArray(response.result?.candidates) ? response.result.candidates.length : 0;
+      if (inspectedRows + count > 500) throw new Error("candidate inspection exceeds 500 returned rows in this Campaign Step");
+      inspectedRows += count;
+      if (response?.ok) onEvidence("lenz_candidates", response, count);
       return result(response);
     },
-  }),
-  ...[
+  }));
+  if (!autonomous) tools.push(...[
     ["lenz_set_bounds", "set-bounds", "bounds"],
     ["lenz_set_objectives", "set-objectives", "objectives"],
     ["lenz_set_constraints", "set-constraints", "constraints"],
   ].map(([name, command, field]) => defineTool({
-    name,
-    label: name.replaceAll("_", " "),
-    description: `Persist audited ${field} reconfiguration without losing trials.`,
+    name, label: name.replaceAll("_", " "), description: `Persist audited ${field} reconfiguration without losing trials.`,
     parameters: Type.Object({ [field]: field === "constraints" ? Type.Array(Type.Record(Type.String(), Type.Unknown())) : Type.Record(Type.String(), Type.Unknown()), rationale: Type.String({ minLength: 1 }) }),
-    async execute(_id, params) {
-      const response = await lenz(command, "--state", state, `--${field}`, JSON.stringify(params[field]), "--rationale", params.rationale);
-      onMutation();
-      return result(response);
-    },
-  })),
-  defineTool({
-    name: "lenz_pareto", label: "Lenz Pareto", description: "Return the feasible observed Pareto front.", parameters: Type.Object({}),
-    async execute() { return result(await lenz("pareto", "--state", state)); },
-  }),
-];
+    async execute(_id, params) { const response = await lenz(command, "--state", state, `--${field}`, JSON.stringify(params[field]), "--rationale", params.rationale); onMutation(); return result(response); },
+  })), defineTool({ name: "lenz_pareto", label: "Lenz Pareto", description: "Return the feasible observed Pareto front.", parameters: Type.Object({}), async execute() { return result(await lenz("pareto", "--state", state)); } }));
+  tools.resetStep = () => { inspectedRows = 0; };
+  return tools;
+};
 
 
 export const requireOk = (response, operation) => {
@@ -256,6 +268,60 @@ export const lowTrustAcquisition = (diagnostics) =>
     : { acqf: "noisy_logei", beta: 2 };
 
 export const enforcePreferredSuggestion = () => undefined;
+
+export const autonomousSystemPrompt = `You own the final optimization decision.
+
+Inspect the public search space, verified historical observations, domain context, and any typed lenz evidence you consider useful. Surrogate outputs are non-binding advice: you may consult, accept, override, or proceed without ranked proposals.
+
+Choose one legal unobserved public Candidate that you judge most valuable for improving the Campaign. Do not access hidden Outcomes, benchmark labels, global-best information, or label-derived statistics.
+
+Before committing, provide the required Decision Evidence Record and finish by committing exactly that Candidate.`;
+
+export const sanitizeAutonomousContext = ({ state_revision, status, dataset_summary, verified_trials = [] }) => ({
+  state_revision,
+  status: {
+    campaign_id: status.campaign_id,
+    target: status.target,
+    direction: status.direction,
+    acqf: status.acqf,
+    beta: status.beta,
+    budget: status.budget,
+    historical_observed: status.historical_observed,
+    observed: status.observed,
+    pending: status.pending,
+    budget_remaining: status.budget_remaining,
+    remaining: status.remaining,
+  },
+  dataset_summary,
+  verified_trials: verified_trials.filter((trial) => trial.source !== "historical"),
+});
+
+export const validateDecisionEvidence = (commitment, toolUse) => {
+  for (const field of ["hypothesis", "expected_outcome", "expected_learning", "rationale"]) {
+    if (typeof commitment[field] !== "string" || !commitment[field].trim()) throw new Error(`Decision Evidence Record requires ${field}`);
+  }
+  if (!Array.isArray(commitment.evidence_sources) || !commitment.evidence_sources.length || commitment.evidence_sources.some((value) => typeof value !== "string" || !value.trim())) {
+    throw new Error("Decision Evidence Record requires non-empty evidence_sources");
+  }
+  const proposed = toolUse.proposals ?? [];
+  const consultedProposal = proposed.length > 0;
+  const consultedOther = (toolUse.calls ?? []).some((name) => ["lenz_diagnostics", "lenz_predict", "lenz_score"].includes(name));
+  const offered = proposed.some((candidate) => Number(candidate.pool_index) === Number(commitment.pool_index) && isDeepStrictEqual(candidate.config, commitment.config));
+  const expected = consultedProposal ? (offered ? "accept" : "override") : (consultedOther ? "informed_without_proposal" : "not_consulted");
+  if (commitment.surrogate_relationship !== expected) throw new Error(`surrogate_relationship must be ${expected} for actual tool use`);
+  return { ...commitment, decision_evidence_complete: true, actual_tool_use: { calls: toolUse.calls ?? [], candidate_rows: toolUse.candidate_rows ?? 0, ranked_proposals_consulted: consultedProposal } };
+};
+
+export const leakagePreflight = ({ prompt, toolNames, context, runtime, prior }) => {
+  const rendered = JSON.stringify({ prompt, toolNames, context });
+  const forbidden = ["dataset_root", "public_root", "test.csv", "global_best", "hidden_rank"];
+  const violations = forbidden.filter((term) => rendered.toLowerCase().includes(term));
+  if (/\/(?:home|mnt|tmp|var)\//i.test(rendered)) violations.push("absolute_dataset_path");
+  if (runtime.noTools !== "builtin" || !runtime.noExtensions || !runtime.noSkills || !runtime.noPromptTemplates || !runtime.noContextFiles) violations.push("runtime_resources_enabled");
+  if (prior.prior_scan !== "label_free" || !prior.prior_hash || !prior.prior_source || !prior.prior_provenance) violations.push("prior_audit_incomplete");
+  if (violations.length) throw new Error(`autonomous leakage preflight failed: ${[...new Set(violations)].join(", ")}`);
+  return { passed: true, violations: [] };
+};
 
 const changedFeatures = (previous, current) => Object.keys(current).filter((key) => previous?.[key] !== current[key]);
 const improved = (value, incumbent, direction) => direction === "minimize" ? value < incumbent : value > incumbent;
