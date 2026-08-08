@@ -92,6 +92,9 @@ export const createCampaignActionTools = (setAction, { autonomous = false } = {}
     expected_outcome: Type.String({ minLength: 1 }),
     expected_learning: Type.String({ minLength: 1 }),
     surrogate_relationship: Type.Union(["accept", "override", "informed_without_proposal", "not_consulted"].map((value) => Type.Literal(value))),
+    surrogate_trust: Type.Union([Type.Literal("low"), Type.Literal("medium"), Type.Literal("high")]),
+    surrogate_trust_rationale: Type.String({ minLength: 1 }),
+    search_mode: Type.Union([Type.Literal("exploit"), Type.Literal("targeted_exploration"), Type.Literal("global_exploration")]),
     rationale: Type.String({ minLength: 1 }),
   };
   const tools = [defineTool({
@@ -273,9 +276,14 @@ export const autonomousSystemPrompt = `You own the final optimization decision.
 
 Inspect the public search space, verified historical observations, domain context, and any typed lenz evidence you consider useful. Surrogate outputs are non-binding advice: you may consult, accept, override, or proceed without ranked proposals.
 
+Before choosing a Candidate, you MUST complete a Surrogate Trust Assessment:
+1. Judge surrogate reliability for the CURRENT step. If you have not yet seen diagnostics this step, either call lenz_diagnostics or explicitly state in surrogate_trust_rationale why existing evidence (e.g. a same-region verified Receipt, an unchanged candidate set) makes re-diagnosis unnecessary. Set surrogate_trust to low, medium, or high and justify it in surrogate_trust_rationale with concrete values (cv_r2, train-CV gap, lengthscale boundaries, posterior variance scale) or the explicit no-rediagnosis reason.
+2. Choose search_mode: "exploit" when a verified Observation supports refining a known-good region; "targeted_exploration" when domain priors or observations identify a promising bounded region where surrogate ranking may assist inside it; "global_exploration" when neither observations nor priors justify a region and coverage/uncertainty should dominate.
+3. Match surrogate_relationship to your actual tool use. A low trust judgment does NOT forbid using GP — it means GP mean/rank must not be the sole deciding evidence.
+
 Choose one legal unobserved public Candidate that you judge most valuable for improving the Campaign. Do not access hidden Outcomes, benchmark labels, global-best information, or label-derived statistics.
 
-Before committing, provide the required Decision Evidence Record and finish by committing exactly that Candidate.`;
+Before committing, provide the required Decision Evidence Record (including surrogate_trust, surrogate_trust_rationale, and search_mode) and finish by committing exactly that Candidate.`;
 
 export const sanitizeAutonomousContext = ({ state_revision, status, dataset_summary, verified_trials = [] }) => ({
   state_revision,
@@ -297,16 +305,23 @@ export const sanitizeAutonomousContext = ({ state_revision, status, dataset_summ
 });
 
 export const validateDecisionEvidence = (commitment, toolUse) => {
-  for (const field of ["hypothesis", "expected_outcome", "expected_learning", "rationale"]) {
+  for (const field of ["hypothesis", "expected_outcome", "expected_learning", "rationale", "surrogate_trust_rationale"]) {
     if (typeof commitment[field] !== "string" || !commitment[field].trim()) throw new Error(`Decision Evidence Record requires ${field}`);
   }
   if (!Array.isArray(commitment.evidence_sources) || !commitment.evidence_sources.length || commitment.evidence_sources.some((value) => typeof value !== "string" || !value.trim())) {
     throw new Error("Decision Evidence Record requires non-empty evidence_sources");
   }
+  if (!["low", "medium", "high"].includes(commitment.surrogate_trust)) throw new Error("Decision Evidence Record requires surrogate_trust low|medium|high");
+  if (!["exploit", "targeted_exploration", "global_exploration"].includes(commitment.search_mode)) throw new Error("Decision Evidence Record requires search_mode exploit|targeted_exploration|global_exploration");
   const proposed = toolUse.proposals ?? [];
   const consultedProposal = proposed.length > 0;
   const consultedOther = (toolUse.calls ?? []).some((name) => ["lenz_diagnostics", "lenz_predict", "lenz_score"].includes(name));
   const offered = proposed.some((candidate) => Number(candidate.pool_index) === Number(commitment.pool_index) && isDeepStrictEqual(candidate.config, commitment.config));
+  if (commitment.surrogate_trust === "low" && commitment.surrogate_relationship === "accept") {
+    const rationale = commitment.surrogate_trust_rationale.toLowerCase();
+    const hasOverrideReason = /\b(?:prior|receipt|observation|observed|region|independent)\b/.test(rationale);
+    if (!hasOverrideReason) throw new Error("low surrogate_trust with surrogate_relationship=accept requires surrogate_trust_rationale to name the non-surrogate evidence (prior, receipt, observation, or region) that justifies the commitment");
+  }
   const expected = consultedProposal ? (offered ? "accept" : "override") : (consultedOther ? "informed_without_proposal" : "not_consulted");
   if (commitment.surrogate_relationship !== expected) throw new Error(`surrogate_relationship must be ${expected} for actual tool use`);
   return { ...commitment, decision_evidence_complete: true, actual_tool_use: { calls: toolUse.calls ?? [], candidate_rows: toolUse.candidate_rows ?? 0, ranked_proposals_consulted: consultedProposal } };

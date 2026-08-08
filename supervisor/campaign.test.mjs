@@ -147,6 +147,9 @@ test("supported offered alternatives are not hard-locked to preferred suggestion
 test("autonomous profile has standalone non-GP-first instructions", () => {
   assert.match(autonomousSystemPrompt, /own the final optimization decision/i);
   assert.match(autonomousSystemPrompt, /non-binding advice/i);
+  assert.match(autonomousSystemPrompt, /Surrogate Trust Assessment/);
+  assert.match(autonomousSystemPrompt, /surrogate_trust_rationale/);
+  for (const mode of ["exploit", "targeted_exploration", "global_exploration"]) assert.match(autonomousSystemPrompt, new RegExp(`"${mode}"`));
   assert.doesNotMatch(autonomousSystemPrompt, /preferred_suggestion|GP rank 1|beta=16/i);
 });
 
@@ -163,19 +166,30 @@ test("autonomous context allowlist excludes paths and ranked proposals", () => {
 });
 
 test("autonomous tools omit permanent domain mutation and early stop", () => {
-  const actions = createCampaignActionTools(() => {}, { autonomous: true }).map((tool) => tool.name);
+  const actionTools = createCampaignActionTools(() => {}, { autonomous: true });
+  const commitCandidate = actionTools[0];
   const tools = createLenzTools(async () => ({ ok: true, result: [] }), "state", () => {}, () => {}, { autonomous: true }).map((tool) => tool.name);
-  assert.deepEqual(actions, ["commit_candidate"]);
+  assert.deepEqual(actionTools.map((tool) => tool.name), ["commit_candidate"]);
+  for (const field of ["surrogate_trust", "surrogate_trust_rationale", "search_mode"]) assert.ok(commitCandidate.parameters.required.includes(field));
+  assert.deepEqual(commitCandidate.parameters.properties.surrogate_trust.anyOf.map((option) => option.const), ["low", "medium", "high"]);
+  assert.deepEqual(commitCandidate.parameters.properties.search_mode.anyOf.map((option) => option.const), ["exploit", "targeted_exploration", "global_exploration"]);
   assert.ok(tools.includes("lenz_candidates"));
   assert.ok(tools.includes("lenz_set_acqf"));
   assert.ok(!tools.some((name) => ["lenz_set_bounds", "lenz_set_objectives", "lenz_set_constraints"].includes(name)));
 });
 
 test("Decision Evidence Record matches actual surrogate use", () => {
-  const base = { pool_index: 7, config: offered[0].config, hypothesis: "plausible chemistry", evidence_sources: ["domain_prior"], expected_outcome: "higher yield", expected_learning: "updates next choice", rationale: "best current tradeoff" };
+  const base = { pool_index: 7, config: offered[0].config, hypothesis: "plausible chemistry", evidence_sources: ["domain_prior"], expected_outcome: "higher yield", expected_learning: "updates next choice", rationale: "best current tradeoff", surrogate_trust: "medium", surrogate_trust_rationale: "cv_r2 0.5 moderate fit", search_mode: "targeted_exploration" };
   assert.equal(validateDecisionEvidence({ ...base, surrogate_relationship: "not_consulted" }, { calls: [] }).decision_evidence_complete, true);
   assert.equal(validateDecisionEvidence({ ...base, surrogate_relationship: "accept" }, { calls: ["lenz_suggest"], proposals: offered }).actual_tool_use.ranked_proposals_consulted, true);
   assert.throws(() => validateDecisionEvidence({ ...base, surrogate_relationship: "not_consulted" }, { calls: ["lenz_score"] }), /informed_without_proposal/);
+  assert.throws(() => validateDecisionEvidence({ ...base, surrogate_trust: undefined, surrogate_relationship: "not_consulted" }, { calls: [] }), /surrogate_trust/);
+  assert.throws(() => validateDecisionEvidence({ ...base, surrogate_trust: "very_low", surrogate_relationship: "not_consulted" }, { calls: [] }), /surrogate_trust/);
+  assert.throws(() => validateDecisionEvidence({ ...base, search_mode: "local", surrogate_relationship: "not_consulted" }, { calls: [] }), /search_mode/);
+  assert.throws(() => validateDecisionEvidence({ ...base, surrogate_trust: "low", surrogate_trust_rationale: "gp is best", surrogate_relationship: "accept" }, { calls: ["lenz_suggest"], proposals: offered }), /non-surrogate evidence/);
+  assert.throws(() => validateDecisionEvidence({ ...base, surrogate_trust: "low", surrogate_trust_rationale: "accept despite low trust because GP rank 1 is best", surrogate_relationship: "accept" }, { calls: ["lenz_suggest"], proposals: offered }), /non-surrogate evidence/);
+  assert.equal(validateDecisionEvidence({ ...base, surrogate_trust: "low", surrogate_trust_rationale: "accept despite low trust because the verified receipt supports this region", surrogate_relationship: "accept" }, { calls: ["lenz_suggest"], proposals: offered }).decision_evidence_complete, true);
+  assert.equal(validateDecisionEvidence({ ...base, search_mode: "exploit", surrogate_relationship: "not_consulted" }, { calls: [] }).decision_evidence_complete, true);
 });
 
 test("candidate inspection enforces 500 returned rows per step", async () => {

@@ -97,6 +97,33 @@ Questions to answer:
 - Node: standalone prompt/context allowlist, autonomous tool surface, 500-row reset, successful evidence tracking across correction attempts, retry mutation barrier, and leakage fail-closed behavior.
 - Smoke: run/export a budget-2 autonomous campaign only after preflight, then validate the exported trajectory against the public dataset.
 
+#### Surrogate Trust Assessment
+
+- Every autonomous `commit_candidate` requires:
+  - `surrogate_trust`: `low | medium | high`;
+  - `surrogate_trust_rationale`: non-empty current-step diagnostic evidence or an explicit reason re-diagnosis is unnecessary;
+  - `search_mode`: `exploit | targeted_exploration | global_exploration`.
+- `low` trust does not forbid GP use. If `surrogate_relationship=accept`, the rationale must name independent support: a prior, verified Receipt/Observation, bounded region, or equivalent independent evidence. GP rank or posterior mean alone is insufficient.
+- Search-mode meanings are fixed:
+  - `exploit`: refine a region supported by a verified Campaign Observation;
+  - `targeted_exploration`: observations or domain prior define a plausible region and GP may assist inside it;
+  - `global_exploration`: neither observations nor prior justify a region, so coverage or uncertainty dominates.
+- `surrogate_trust` and `search_mode` are audit fields, not numeric hard gates. Do not derive a universal trust threshold from one dataset.
+- Deterministic validation rejects missing/invalid enums and low-trust GP acceptance without named independent evidence. Behavioral consistency between declared `search_mode` and actual Candidate inspection remains a trajectory/session review concern.
+- Node tests must inspect the autonomous `commit_candidate` TypeBox schema, prompt calibration clauses, invalid enums, thin low-trust acceptance, and justified low-trust acceptance.
+
+##### Wrong
+
+```text
+cv_r2 is negative; GP rank 1 is best, so accept it.
+```
+
+##### Correct
+
+```text
+surrogate_trust=low; search_mode=targeted_exploration. The verified/high-yield local region and domain prior independently support this Candidate; GP rank is advisory within that region.
+```
+
 ### 7. Wrong vs Correct
 
 #### Wrong
