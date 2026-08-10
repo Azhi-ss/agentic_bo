@@ -156,3 +156,58 @@ The model used score in an earlier rejected attempt, but the final trajectory sa
 ```text
 Successful Step evidence accumulates until a valid Commitment, and reporting cross-checks the complete session trace and signed Receipts.
 ```
+
+## Scenario: Matrix Experiment Configuration
+
+### 1. Scope / Trigger
+
+- Trigger: a repeatable multi-policy benchmark plan moves from hardcoded constants to authored YAML.
+- Schema version 1 is exactly `policies × seeds` with shared settings; per-run overrides are forbidden.
+
+### 2. Signatures
+
+- `boagent experiment --config <yaml> [--plan]`
+- `load_experiment_config(path: Path, *, check_output_collisions: bool = True) -> LoadedExperiment`
+
+### 3. Contracts
+
+- Paths are resolved relative to the YAML file, while canonical hash material preserves authored POSIX paths and excludes machine-specific absolute paths.
+- `--plan` validates and expands policies/seeds in authored order without creating directories or starting a provider.
+- Execute mode reuses `boagent init` and `boagent run`, records source and normalized hashes, and passes provider/model/thinking/policy explicitly.
+- Declared config hash is immutable provenance; effective acquisition changes remain separate runtime revisions.
+- Older direct campaigns may omit declared provenance. If a manifest declares `experiment_policy`, it must equal the runtime policy.
+
+### 4. Validation & Error Matrix
+
+- Unknown field, unsupported schema/enums, duplicate policy/seed, invalid positive budget/beta, or missing dataset -> fail before mutation.
+- Any expanded campaign output already exists -> reject the whole plan before initialization.
+- Declared manifest policy differs from runtime policy -> fail before model runtime/provider startup.
+- Config-backed rerun with stale/mismatched provenance or a non-fresh output -> fail closed; direct legacy `init`/`run` remains compatible.
+- Validation errors identify field paths but never echo secret/hidden values or complete YAML.
+
+### 5. Good/Base/Bad Cases
+
+- Good: one checked-in YAML expands deterministically to every declared policy/seed campaign with matching manifest, Frame, and run-audit provenance.
+- Base: direct `boagent init`/`run` without config keeps existing defaults and legacy manifest compatibility.
+- Bad: environment or manifest silently overrides the YAML policy/model, one campaign starts before a later collision is found, or runtime acquisition mutates the declared hash.
+
+### 6. Tests Required
+
+- Python: strict schema, CWD-independent paths/hash, authored-order expansion, whole-plan collision preflight, side-effect-free plan, direct CLI compatibility, and secret-safe errors.
+- Node: legacy provenance fallback, matching declared/runtime policy, mismatched policy rejection, model-visible provenance allowlist, and syntax checks.
+- Smoke: sample `--plan` and one config-backed initialization path without a live provider call; assert manifest/Frame/audit agreement.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```javascript
+experiment_policy: manifest.experiment_policy ?? runtimePolicy
+```
+
+#### Correct
+
+```javascript
+if (manifest.experiment_policy && manifest.experiment_policy !== runtimePolicy) throw new Error("policy mismatch");
+experiment_policy: runtimePolicy
+```

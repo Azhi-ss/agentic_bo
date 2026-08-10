@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { acquisitionScore, autonomousSystemPrompt, campaignResult, createCampaignActionTools, createLenzTools, enforcePreferredSuggestion, leakagePreflight, lowTrustAcquisition, nearBestCandidates, optimizationPolicy, preferredSuggestion, promptWithTransientRetries, reconcileTrajectory, replayOptimizationPolicy, requireCampaignAction, requireOk, requirePolicyAllowance, requireReceipt, sanitizeAutonomousContext, validateCampaignStatus, validateDecisionEvidence, verifyCommitment, verifiedTrialFacts, verifyOptimizationPolicy, verifyStop } from "./campaign.mjs";
+import { acquisitionScore, autonomousSystemPrompt, campaignResult, createCampaignActionTools, createLenzTools, declaredRunProvenance, enforcePreferredSuggestion, leakagePreflight, lowTrustAcquisition, nearBestCandidates, optimizationPolicy, preferredSuggestion, promptWithTransientRetries, reconcileTrajectory, replayOptimizationPolicy, requireCampaignAction, requireOk, requirePolicyAllowance, requireReceipt, sanitizeAutonomousContext, validateCampaignStatus, validateDecisionEvidence, verifyCommitment, verifiedTrialFacts, verifyOptimizationPolicy, verifyStop } from "./campaign.mjs";
 
 const offered = [{
   candidate_id: "candidate-a",
@@ -163,6 +163,23 @@ test("autonomous context allowlist excludes paths and ranked proposals", () => {
   assert.equal(context.status.public_root, undefined);
   assert.equal(context.suggestions, undefined);
   assert.equal(context.preferred_suggestion, undefined);
+  assert.equal(context.declared_provenance, undefined);
+});
+
+test("autonomous context allows only declared experiment provenance", () => {
+  const context = sanitizeAutonomousContext({
+    state_revision: 2,
+    status: { campaign_id: "c", target: "Yield", direction: "maximize", acqf: "ucb", beta: 4, budget: 2, historical_observed: 3, observed: 0, pending: [], budget_remaining: 2, remaining: 10 },
+    dataset_summary: { rows: { candidate_pool: 10 } },
+    declared_provenance: { experiment_name: "public-name", experiment_policy: "autonomous_agent", declared_config_hash: "abc", source_config: "/tmp/secret.yaml", hidden_rank: 1 },
+  });
+  assert.deepEqual(context.declared_provenance, { experiment_name: "public-name", experiment_policy: "autonomous_agent", declared_config_hash: "abc" });
+});
+
+test("run audit provenance is additive, backward compatible, and policy-bound", () => {
+  assert.deepEqual(declaredRunProvenance({}, "default"), { declared_config_hash: null, experiment_name: null, experiment_policy: "default" });
+  assert.deepEqual(declaredRunProvenance({ normalized_config_hash: "hash", experiment_name: "experiment", experiment_policy: "autonomous_agent" }, "autonomous_agent"), { declared_config_hash: "hash", experiment_name: "experiment", experiment_policy: "autonomous_agent" });
+  assert.throws(() => declaredRunProvenance({ experiment_policy: "autonomous_agent" }, "default"), /does not match runtime policy/);
 });
 
 test("autonomous tools omit permanent domain mutation and early stop", () => {

@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 from statistics import mean, median, stdev
 
+from boagent.experiment_config import load_experiment_config
 from boagent.oracle import verify_receipt
 
 
@@ -71,33 +72,21 @@ def benchmark_report(agent_root: Path, gp_root: Path, seeds: list[int], target: 
     report["passed"] = agent["best"] > gp["best"] and agent["auc_best_so_far"] > gp["auc_best_so_far"] and agent["simple_regret"] < gp["simple_regret"] and lcb > 0
     return report
 
+SAMPLE_EXPERIMENT_CONFIG = Path(__file__).resolve().parents[1] / "experiment-configs" / "suzuki-autonomous-agent.yaml"
 EXPERIMENT_SEEDS = [300, 301, 302, 303, 304]
 EXPERIMENT_POLICIES = {"default", "autonomous_agent"}
 
 
-def experiment_run_plan(output: Path, dataset: Path, policies: list[str]) -> list[dict]:
-    unknown = set(policies) - EXPERIMENT_POLICIES
-    if unknown:
-        raise ValueError(f"unknown policies: {', '.join(sorted(unknown))}")
+def experiment_run_plan(config: Path = SAMPLE_EXPERIMENT_CONFIG, *, check_output_collisions: bool = True) -> list[dict]:
+    loaded = load_experiment_config(config, check_output_collisions=check_output_collisions)
     plan = []
-    for policy in policies:
-        for seed in EXPERIMENT_SEEDS:
-            campaign = output / policy / f"seed-{seed}"
-            if campaign.exists():
-                raise FileExistsError(f"campaign directory already exists: {campaign}")
-            plan.append({
-                "policy": policy,
-                "seed": seed,
-                "budget": 2,
-                "provider": "ai-modeling",
-                "model": "gpt-5.6-sol",
-                "thinking": "xhigh",
-                "provider_generation_seed": "unavailable",
-                "output": str(campaign),
-                "init_command": ["boagent", "init", "--dataset-root", str(dataset), "--output", str(campaign), "--seed", str(seed), "--budget", "2"],
-                "preflight": "mandatory_fail_closed_before_provider_startup",
-                "run_command": ["boagent", "run", "--campaign", str(campaign), "--model", "gpt-5.6-sol", "--thinking", "xhigh", "--policy", policy],
-            })
+    for item in loaded.runs():
+        campaign = str(item["output"])
+        plan.append({
+            **item,
+            "init_command": ["boagent", "init", "--dataset-root", str(item["dataset"]), "--output", campaign, "--seed", str(item["seed"]), "--budget", str(item["budget"]), "--target", str(item["target"]), "--direction", str(item["direction"])],
+            "run_command": ["boagent", "run", "--campaign", campaign, "--model", str(item["model"]), "--thinking", str(item["thinking"]), "--policy", str(item["policy"])],
+        })
     return plan
 
 
@@ -210,15 +199,17 @@ def main() -> None:
     parser.add_argument("--labels", type=Path)
     parser.add_argument("--output", type=Path)
     parser.add_argument("--experiment-root", type=Path)
-    parser.add_argument("--dataset", type=Path)
+    parser.add_argument("--config", type=Path)
     parser.add_argument("--policies", nargs="*", choices=sorted(EXPERIMENT_POLICIES))
     parser.add_argument("--plan", action="store_true")
     args = parser.parse_args()
-    if args.experiment_root:
+    if args.plan:
+        if not args.config:
+            parser.error("--plan requires --config")
+        summary = experiment_run_plan(args.config, check_output_collisions=False)
+    elif args.experiment_root or args.config:
         policies = args.policies or ["default", "autonomous_agent"]
-        if args.plan and not args.dataset:
-            parser.error("--plan requires --dataset")
-        summary = experiment_run_plan(args.experiment_root, args.dataset, policies) if args.plan else experiment_report(args.experiment_root, policies, args.seeds or EXPERIMENT_SEEDS)
+        summary = experiment_report(args.experiment_root, policies, args.seeds or EXPERIMENT_SEEDS)
     elif args.labels:
         if not args.agent or not args.gp or not args.seeds:
             parser.error("--labels requires --agent, --gp, and --seeds")

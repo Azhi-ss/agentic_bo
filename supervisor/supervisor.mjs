@@ -6,7 +6,7 @@ import { isDeepStrictEqual } from "node:util";
 import { fileURLToPath } from "node:url";
 
 import { createAgentSession, DefaultResourceLoader, getAgentDir, ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
-import { acquisitionScore, autonomousSystemPrompt, campaignResult, createCampaignActionTools, createLenzTools, enforcePreferredSuggestion, leakagePreflight, lowTrustAcquisition, nearBestCandidates, preferredSuggestion, promptWithTransientRetries, reconcileTrajectory, requireCampaignAction, requireOk, requirePolicyAllowance, requireReceipt, sanitizeAutonomousContext, validateCampaignStatus, validateDecisionEvidence, verifiedTrialFacts, verifyCommitment, verifyOptimizationPolicy, verifyStop } from "./campaign.mjs";
+import { acquisitionScore, autonomousSystemPrompt, campaignResult, createCampaignActionTools, createLenzTools, declaredRunProvenance, enforcePreferredSuggestion, leakagePreflight, lowTrustAcquisition, nearBestCandidates, preferredSuggestion, promptWithTransientRetries, reconcileTrajectory, requireCampaignAction, requireOk, requirePolicyAllowance, requireReceipt, sanitizeAutonomousContext, validateCampaignStatus, validateDecisionEvidence, verifiedTrialFacts, verifyCommitment, verifyOptimizationPolicy, verifyStop } from "./campaign.mjs";
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, "..");
 const argv = process.argv.slice(2);
@@ -61,7 +61,7 @@ const codeRevisionHash = async () => {
 const auditPath = resolve(campaign, "campaign-run-config.json");
 const audit = await readFile(auditPath).then((text) => JSON.parse(text), () => ({ revisions: [] }));
 const renderedSystem = autonomous ? system : [system, reference].join("\n\n---\n\n");
-const runConfig = { campaign_id: manifest.campaign_id, provider, model: modelId, thinking, policy, system_prompt_hash: hash(system), reference_hash: autonomous ? null : hash(reference), prompt_hash: hash(renderedSystem), prior_hash: manifest.prior_hash, prior_source: manifest.prior_source, prior_scan: manifest.prior_scan, prior_provenance: manifest.prior_provenance, provider_generation_seed: "unavailable", code_revision_hash: await codeRevisionHash() };
+const runConfig = { campaign_id: manifest.campaign_id, provider, model: modelId, thinking, policy, ...declaredRunProvenance(manifest, policy), system_prompt_hash: hash(system), reference_hash: autonomous ? null : hash(reference), prompt_hash: hash(renderedSystem), prior_hash: manifest.prior_hash, prior_source: manifest.prior_source, prior_scan: manifest.prior_scan, prior_provenance: manifest.prior_provenance, provider_generation_seed: "unavailable", code_revision_hash: await codeRevisionHash() };
 runConfig.config_hash = hash(JSON.stringify(runConfig));
 let campaignAction;
 let turnMutated = false;
@@ -98,7 +98,7 @@ const defaultToolContext = async () => {
     preferred_suggestion: preferredSuggestion(offered),
     diagnostics: requireOk(diagnostics, "diagnostics"),
     verified_trials: verifiedTrialFacts(requireOk(trials, "trials")),
-    effective_manifest: { campaign_id: manifest.campaign_id, seed: manifest.seed, budget: manifest.budget, target: status.result.target, direction: status.result.direction },
+    effective_manifest: { campaign_id: manifest.campaign_id, seed: manifest.seed, budget: manifest.budget, target: status.result.target, direction: status.result.direction, ...(manifest.experiment_name ? { experiment_name: manifest.experiment_name } : {}), ...(manifest.experiment_policy ? { experiment_policy: manifest.experiment_policy } : {}), ...(manifest.normalized_config_hash ? { declared_config_hash: manifest.normalized_config_hash } : {}) },
   };
 };
 const toolContext = async () => {
@@ -106,7 +106,7 @@ const toolContext = async () => {
   const status = await lenz("status", "--state", state);
   const trials = await lenz("trials", "--state", state);
   const datasetSummary = JSON.parse(await readFile(resolve(campaign, "dataset-summary.json"), "utf8"));
-  return sanitizeAutonomousContext({ state_revision: status.state_revision, status: requireOk(status, "status"), dataset_summary: datasetSummary, verified_trials: verifiedTrialFacts(requireOk(trials, "trials")) });
+  return sanitizeAutonomousContext({ state_revision: status.state_revision, status: requireOk(status, "status"), dataset_summary: datasetSummary, verified_trials: verifiedTrialFacts(requireOk(trials, "trials")), declared_provenance: manifest.normalized_config_hash ? { experiment_name: manifest.experiment_name, experiment_policy: manifest.experiment_policy, declared_config_hash: manifest.normalized_config_hash } : undefined });
 };
 
 const trajectoryPath = resolve(campaign, "trajectory.json");

@@ -64,6 +64,12 @@ class Study:
     constraints: list[dict[str, Any]] = field(default_factory=list)
     original_domain: dict[str, list[Any]] = field(default_factory=dict)
     active_bounds: dict[str, Any] = field(default_factory=dict)
+    declared_config_hash: str | None = None
+    source_config_hash: str | None = None
+    source_config: str | None = None
+    experiment_name: str | None = None
+    experiment_policy: str | None = None
+    initial_acquisition: dict[str, Any] | None = None
 
     @classmethod
     def load(cls, path: Path) -> Study:
@@ -73,6 +79,12 @@ class Study:
         raw.setdefault("constraints", [])
         raw.setdefault("original_domain", raw["categories"])
         raw.setdefault("active_bounds", {})
+        raw.setdefault("declared_config_hash", None)
+        raw.setdefault("source_config_hash", None)
+        raw.setdefault("source_config", None)
+        raw.setdefault("experiment_name", None)
+        raw.setdefault("experiment_policy", None)
+        raw.setdefault("initial_acquisition", None)
         initial = raw.get("initial", [])
         if initial and not any(trial.source == "historical" for trial in raw["trials"]):
             features = raw["features"]

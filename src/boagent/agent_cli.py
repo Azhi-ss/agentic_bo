@@ -14,6 +14,7 @@ import torch
 import pandas as pd
 import typer
 from dotenv import load_dotenv
+from .experiment_config import load_experiment_config
 
 from .state import Study
 
@@ -53,15 +54,16 @@ def summarize_dataset(train: pd.DataFrame, candidates: pd.DataFrame, target: str
     }
 
 
-@app.command()
-def init(
-    dataset_root: Path = typer.Option(...),
-    output: Path = typer.Option(...),
-    seed: int = typer.Option(100),
-    budget: int = typer.Option(40, min=1),
-    target: str = typer.Option("Yield"),
-    direction: str = typer.Option("maximize"),
-) -> None:
+def initialize_campaign(
+    dataset_root: Path,
+    output: Path,
+    seed: int = 100,
+    budget: int = 40,
+    target: str = "Yield",
+    direction: str = "maximize",
+    provenance: dict[str, object] | None = None,
+    initial_acquisition: dict[str, object] | None = None,
+) -> dict[str, str]:
     dataset_root = dataset_root.resolve()
     output = output.resolve()
     candidates = pd.read_csv(dataset_root / "test_features.csv")
@@ -85,6 +87,8 @@ def init(
         "prior_source": "PRIOR.md",
         "prior_scan": "label_free" if not any(term in prior_text.lower() for term in forbidden_prior_terms) else "failed",
         "prior_provenance": "mechanism_or_pre_experiment_source",
+        **(provenance or {}),
+        **({"initial_runtime": initial_acquisition} if initial_acquisition else {}),
     }
     (output / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2))
     options = json.loads((dataset_root / "options.json").read_text())
@@ -122,15 +126,35 @@ def init(
     key_path = output / ".receipt-key"
     key_path.write_text(secrets.token_hex(32))
     key_path.chmod(0o600)
-    typer.echo(json.dumps({"ok": True, "campaign": str(output), "campaign_id": campaign_id}, ensure_ascii=False))
+    if provenance or initial_acquisition:
+        study_path = output / "frame" / "state.json"
+        study = Study.load(study_path)
+        study.declared_config_hash = str((provenance or {}).get("normalized_config_hash")) if (provenance or {}).get("normalized_config_hash") else None
+        study.source_config_hash = str((provenance or {}).get("source_config_hash")) if (provenance or {}).get("source_config_hash") else None
+        study.source_config = str((provenance or {}).get("source_config")) if (provenance or {}).get("source_config") else None
+        study.experiment_name = str((provenance or {}).get("experiment_name")) if (provenance or {}).get("experiment_name") else None
+        study.experiment_policy = str((provenance or {}).get("experiment_policy")) if (provenance or {}).get("experiment_policy") else None
+        if initial_acquisition:
+            study.acqf = str(initial_acquisition["acqf"])
+            study.beta = float(initial_acquisition["beta"])
+            study.initial_acquisition = {**initial_acquisition, "origin": "experiment_config"}
+        study.save(study_path)
+    result = {"ok": True, "campaign": str(output), "campaign_id": campaign_id}
+    return result
+
 
 @app.command()
-def run(
-    campaign: Path = typer.Option(...),
-    model: str = typer.Option("gpt-5.6-sol"),
-    thinking: str = typer.Option("xhigh"),
-    policy: str = typer.Option("default", help="Campaign profile: default or autonomous_agent."),
+def init(
+    dataset_root: Path = typer.Option(...),
+    output: Path = typer.Option(...),
+    seed: int = typer.Option(100),
+    budget: int = typer.Option(40, min=1),
+    target: str = typer.Option("Yield"),
+    direction: str = typer.Option("maximize"),
 ) -> None:
+    typer.echo(json.dumps(initialize_campaign(dataset_root, output, seed, budget, target, direction), ensure_ascii=False))
+
+def run_campaign(campaign: Path, model: str = "gpt-5.6-sol", thinking: str = "xhigh", policy: str = "default") -> None:
     if policy not in {"default", "autonomous_agent"}:
         raise typer.BadParameter("policy must be one of: default, autonomous_agent")
     campaign = campaign.resolve()
@@ -150,6 +174,50 @@ def run(
         if policy != "default":
             command.extend(["--policy", policy])
         subprocess.run(command, cwd=supervisor, env=env, check=True)
+
+
+@app.command()
+def run(
+    campaign: Path = typer.Option(...),
+    model: str = typer.Option("gpt-5.6-sol"),
+    thinking: str = typer.Option("xhigh"),
+    policy: str = typer.Option("default", help="Campaign profile: default or autonomous_agent."),
+) -> None:
+    run_campaign(campaign, model, thinking, policy)
+
+
+@app.command()
+def experiment(config: Path = typer.Option(...), plan: bool = typer.Option(False, "--plan")) -> None:
+    try:
+        loaded = load_experiment_config(config, check_output_collisions=not plan)
+    except (ValueError, FileExistsError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    public_plan = loaded.public_plan()
+    if plan:
+        typer.echo(json.dumps(public_plan, ensure_ascii=False, sort_keys=True))
+        return
+    for item in loaded.runs():
+        campaign = Path(str(item["output"]))
+        provenance = {
+            "experiment_name": item["experiment_name"],
+            "experiment_policy": item["policy"],
+            "source_config": loaded.config_path.name,
+            "source_config_hash": loaded.source_config_hash,
+            "normalized_config_hash": loaded.normalized_config_hash,
+        }
+        acquisition = item["initial_acquisition"]
+        initialize_campaign(
+            loaded.dataset_path,
+            campaign,
+            int(item["seed"]),
+            int(item["budget"]),
+            str(item["target"]),
+            str(item["direction"]),
+            provenance,
+            {"acqf": acquisition["name"], "beta": acquisition["beta"]},
+        )
+        run_campaign(campaign, model=str(item["model"]), thinking=str(item["thinking"]), policy=str(item["policy"]))
+    typer.echo(json.dumps({"ok": True, "campaigns": len(public_plan["runs"]), "normalized_config_hash": loaded.normalized_config_hash}, ensure_ascii=False))
 
 
 @app.command()

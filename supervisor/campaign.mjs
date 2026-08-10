@@ -285,7 +285,18 @@ Choose one legal unobserved public Candidate that you judge most valuable for im
 
 Before committing, provide the required Decision Evidence Record (including surrogate_trust, surrogate_trust_rationale, and search_mode) and finish by committing exactly that Candidate.`;
 
-export const sanitizeAutonomousContext = ({ state_revision, status, dataset_summary, verified_trials = [] }) => ({
+export const declaredRunProvenance = (manifest, policy) => {
+  if (manifest.experiment_policy && manifest.experiment_policy !== policy) {
+    throw new Error(`declared experiment policy ${manifest.experiment_policy} does not match runtime policy ${policy}`);
+  }
+  return {
+    declared_config_hash: manifest.normalized_config_hash ?? null,
+    experiment_name: manifest.experiment_name ?? null,
+    experiment_policy: policy,
+  };
+};
+
+export const sanitizeAutonomousContext = ({ state_revision, status, dataset_summary, verified_trials = [], declared_provenance }) => ({
   state_revision,
   status: {
     campaign_id: status.campaign_id,
@@ -302,6 +313,11 @@ export const sanitizeAutonomousContext = ({ state_revision, status, dataset_summ
   },
   dataset_summary,
   verified_trials: verified_trials.filter((trial) => trial.source !== "historical"),
+  ...(declared_provenance ? { declared_provenance: {
+    experiment_name: declared_provenance.experiment_name,
+    experiment_policy: declared_provenance.experiment_policy,
+    declared_config_hash: declared_provenance.declared_config_hash,
+  } } : {}),
 });
 
 export const validateDecisionEvidence = (commitment, toolUse) => {

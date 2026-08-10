@@ -6,7 +6,7 @@ import unittest
 import pandas as pd
 from boagent.oracle import receipt_signature
 
-from benchmark.compare import benchmark_report, experiment_report, experiment_run_plan, summarize_many, summarize_pair
+from benchmark.compare import SAMPLE_EXPERIMENT_CONFIG, benchmark_report, experiment_report, experiment_run_plan, summarize_many, summarize_pair
 
 
 class BenchmarkComparisonTest(unittest.TestCase):
@@ -80,19 +80,24 @@ class BenchmarkComparisonTest(unittest.TestCase):
             self.assertLess(report["aggregate"]["agent"]["simple_regret"], report["aggregate"]["gp"]["simple_regret"])
             self.assertEqual(len(report["seeds"]), 10)
 
-    def test_experiment_plan_uses_fixed_seeds_budget_two_and_refuses_existing_directories(self) -> None:
+    def test_experiment_plan_comes_from_checked_in_config_and_refuses_existing_directories(self) -> None:
         with TemporaryDirectory() as directory:
             root = Path(directory)
-            plan = experiment_run_plan(root, Path("datasets/chemical_reactions/suzuki"), ["default", "autonomous_agent"])
+            copied = root / "experiment.yaml"
+            config = SAMPLE_EXPERIMENT_CONFIG.read_text().replace("../runs/suzuki/autonomous-agent-bo", "output")
+            config = config.replace("../datasets/chemical_reactions/suzuki", str((SAMPLE_EXPERIMENT_CONFIG.parent.parent / "datasets/chemical_reactions/suzuki").resolve()))
+            copied.write_text(config)
+            plan = experiment_run_plan(copied)
 
             self.assertEqual({item["seed"] for item in plan}, {300, 301, 302, 303, 304})
             self.assertTrue(all(item["budget"] == 2 for item in plan))
             self.assertTrue(all(item["policy"] in {"default", "autonomous_agent"} for item in plan))
             self.assertTrue(all(item["provider_generation_seed"] == "unavailable" for item in plan))
             self.assertEqual(len({item["output"] for item in plan}), 10)
+
             Path(plan[0]["output"]).mkdir(parents=True)
             with self.assertRaisesRegex(FileExistsError, "already exists"):
-                experiment_run_plan(root, Path("datasets/chemical_reactions/suzuki"), ["default", "autonomous_agent"])
+                experiment_run_plan(copied)
 
     def test_experiment_report_aggregates_action_and_two_step_metrics(self) -> None:
         with TemporaryDirectory() as directory:
