@@ -1,0 +1,19 @@
+schema_version: 1
+experiment:
+  name: suzuki-autonomous-agent-budget40-seed300
+  dataset: ../datasets/chemical_reactions/suzuki
+  output: ../runs/suzuki/selection-contract-budget40
+  policies: [autonomous_agent]
+  seeds: [300]
+  budget: 40
+  objective:
+    target: Yield
+    direction: maximize
+runtime:
+  provider: ai-modeling
+  model: gpt-5.6-sol
+  thinking: xhigh
+  defaults:
+    acquisition:
+      name: noisy_logei
+      beta: 2.0
