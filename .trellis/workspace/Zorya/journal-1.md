@@ -30,3 +30,24 @@ Implemented and validated autonomous and chemistry-first Agent BO profiles, comp
 ### Status
 
 [OK] **Completed**
+
+
+## Session 2: Standardize experiment parameter configuration
+
+**Date**: 2026-08-10
+**Task**: Standardize experiment parameter configuration
+**Branch**: `main`
+
+### Summary
+
+Added strict matrix-only YAML experiment configuration, config-backed planning/execution, provenance binding, leakage-safe validation, compatibility tests, and sample Suzuki plan.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `52915b3` | (see git log) |
+
+### Status
+
+[OK] **Completed**

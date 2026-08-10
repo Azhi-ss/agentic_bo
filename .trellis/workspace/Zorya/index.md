@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 1
+- **Total Sessions**: 2
 - **Last Active**: 2026-08-10
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~32 | Active |
+| `journal-1.md` | ~53 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 2 | 2026-08-10 | Standardize experiment parameter configuration | `52915b3` | `main` |
 | 1 | 2026-08-10 | Agent-led BO experiments | `79d77f5`, `30ecaa1`, `1a89d0e`, `733517b`, `cf432bd` | `main` |
 <!-- @@@/auto:session-history -->
 
