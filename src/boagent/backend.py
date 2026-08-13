@@ -125,6 +125,39 @@ def _cross_validated_r2(train_x: torch.Tensor, train_y: torch.Tensor) -> tuple[f
         return None, "fit_failed"
 
 
+def _sensitivity_analysis(model: MixedSingleTaskGP, study: Study, train_x: torch.Tensor) -> dict[str, float]:
+    """First-order sensitivity proxy per dimension for a (categorical) GP.
+
+    For each training point, vary each dimension across all of its domain
+    levels while holding the other dimensions at the point's value, then take
+    the standard deviation of the posterior mean across those variations.
+    A dimension whose levels leave the response roughly unchanged gets a small
+    value; one whose levels swing the response dominates. Averaged over the
+    training data. Constant dimensions (a single level) report 0.0.
+
+    NOTE: autograd through MixedSingleTaskGP's CategoricalKernel is not
+    supported (the categorical input path is discrete), so a discrete
+    finite-difference proxy is used instead of a true gradient.
+    """
+    if not len(train_x):
+        return {feature: 0.0 for feature in study.features}
+    means: dict[str, list[float]] = {feature: [] for feature in study.features}
+    with torch.no_grad():
+        for point in train_x:
+            for dimension, feature in enumerate(study.features):
+                levels = study.categories.get(feature, [])
+                if len(levels) <= 1:
+                    means[feature].append(0.0)
+                    continue
+                variations = torch.empty((len(levels),), dtype=DTYPE)
+                for level_index, level in enumerate(levels):
+                    probe = point.clone()
+                    probe[dimension] = float(level_index)
+                    variations[level_index] = model.posterior(probe.unsqueeze(0)).mean.squeeze(-1).item()
+                means[feature].append(float(variations.std().item()))
+    return {feature: float(np.mean(values)) for feature, values in means.items()}
+
+
 def diagnostics(fitted: FittedSurrogate, study: Study) -> dict[str, Any]:
     with torch.no_grad():
         predicted = fitted.model.posterior(fitted.train_x).mean.squeeze(-1).cpu().numpy()
@@ -141,4 +174,5 @@ def diagnostics(fitted: FittedSurrogate, study: Study) -> dict[str, Any]:
         "cv_r2_status": cv_r2_status,
         "noise": noise,
         "lengthscales": dict(zip(study.features, lengthscale, strict=False)),
+        "sensitivity": _sensitivity_analysis(fitted.model, study, fitted.train_x),
     }
