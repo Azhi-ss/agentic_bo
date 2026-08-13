@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { acquisitionScore, autonomousSystemPrompt, campaignResult, createCampaignActionTools, createLenzTools, declaredRunProvenance, enforcePreferredSuggestion, leakagePreflight, lowTrustAcquisition, nearBestCandidates, optimizationPolicy, preferredSuggestion, promptWithTransientRetries, reconcileTrajectory, replayOptimizationPolicy, requireCampaignAction, requireOk, requirePolicyAllowance, requireReceipt, sanitizeAutonomousContext, validateCampaignStatus, validateDecisionEvidence, verifyCommitment, verifiedTrialFacts, verifyOptimizationPolicy, verifyStop } from "./campaign.mjs";
+import { acquisitionScore, autonomousSystemPrompt, campaignResult, createCampaignActionTools, createLenzTools, createRetryPrompt, createStepInstruction, crossContextCoverage, declaredRunProvenance, enforcePreferredSuggestion, gpDissentStreak, leakagePreflight, lowTrustAcquisition, nearBestCandidates, optimizationPolicy, preferredSuggestion, promptWithTransientRetries, reconcileTrajectory, replayOptimizationPolicy, requireCampaignAction, requireOk, requirePolicyAllowance, requireReceipt, resolveAutonomousPolicyAudit, sanitizeAutonomousContext, scopeOverreach, validateCampaignStatus, validateDecisionEvidence, verifyCommitment, verifiedTrialFacts, verifyOptimizationPolicy, verifyStop } from "./campaign.mjs";
 
 const offered = [{
   candidate_id: "candidate-a",
@@ -125,8 +125,8 @@ test("near-best candidates keep numerically tied terminal alternatives", () => {
   assert.deepEqual(nearBestCandidates(candidates).map((candidate) => candidate.pool_index), [1, 2]);
 });
 
-test("low-trust diagnostics select exploratory UCB", () => {
-  assert.deepEqual(lowTrustAcquisition({ cv_r2: -0.1, cv_r2_status: "ok" }), { acqf: "ucb", beta: 16 });
+test("low-trust diagnostics select exploratory UCB with conservative beta", () => {
+  assert.deepEqual(lowTrustAcquisition({ cv_r2: -0.1, cv_r2_status: "ok" }), { acqf: "ucb", beta: 1 });
   assert.deepEqual(lowTrustAcquisition({ cv_r2: 0.5, cv_r2_status: "ok" }), { acqf: "noisy_logei", beta: 2 });
 });
 
@@ -153,17 +153,110 @@ test("autonomous profile has standalone non-GP-first instructions", () => {
   assert.doesNotMatch(autonomousSystemPrompt, /preferred_suggestion|GP rank 1|beta=16/i);
 });
 
+test("retry prompt generator helper creates concise non-duplicative error messages", () => {
+  const error = new Error("policy caution (stalled_policy): repeated signature");
+  const autoRetry = createRetryPrompt(error, { autonomous: true });
+  assert.match(autoRetry, /Your previous campaign action was rejected: policy caution/);
+  assert.match(autoRetry, /commit_candidate/);
+  assert.doesNotMatch(autoRetry, /Current verified campaign evidence/);
+  assert.doesNotMatch(autoRetry, /JSON\.stringify|dataset_summary|historical_observed/);
+
+  const defaultRetry = createRetryPrompt(error, { autonomous: false });
+  assert.match(defaultRetry, /Your previous campaign action was rejected: policy caution/);
+  assert.match(defaultRetry, /commit_candidate/);
+  assert.match(defaultRetry, /stop_campaign/);
+  assert.doesNotMatch(defaultRetry, /Current verified campaign evidence/);
+});
+
+test("system prompt and step prompt contracts clarify tool discipline and decision finalization", () => {
+  const queryTools = ["lenz_diagnostics", "lenz_candidates", "lenz_suggest", "lenz_score", "lenz_predict", "lenz_trials"];
+  for (const tool of queryTools) {
+    assert.match(autonomousSystemPrompt, new RegExp(tool));
+  }
+  assert.match(autonomousSystemPrompt, /page.*lenz_trials.*historical separately/i);
+  assert.match(autonomousSystemPrompt, /commit_candidate/);
+  assert.match(autonomousSystemPrompt, /first step.*lenz_trials/i);
+  assert.match(autonomousSystemPrompt, /global incumbent.*best finite target value/i);
+  assert.match(autonomousSystemPrompt, /expected_objective_value.*strictly beats/i);
+  assert.match(autonomousSystemPrompt, /transport or local-baseline.*decision_information/i);
+  assert.match(autonomousSystemPrompt, /non-binding workflow.*lenz_suggest for a shortlist.*lenz_score and\/or lenz_predict/i);
+  assert.match(autonomousSystemPrompt, /not a fixed order.*neither score nor predict is mandatory/i);
+  assert.match(autonomousSystemPrompt, /interpret the verified Observation before requesting refreshed posterior advice/i);
+  assert.match(autonomousSystemPrompt, /do not mechanically repeat.*without new observation or configuration evidence/i);
+  assert.match(autonomousSystemPrompt, /repeated action patterns.*change strategy, hypothesis, or search region/i);
+
+  const autoStep = createStepInstruction({ autonomous: true });
+  for (const tool of queryTools) {
+    assert.match(autoStep, new RegExp(tool));
+  }
+  assert.match(autoStep, /page.*lenz_trials.*historical separately/i);
+  assert.match(autoStep, /commit_candidate/);
+  assert.match(autoStep, /first step inspect verified observations/i);
+  assert.match(autoStep, /global incumbent/i);
+  assert.match(autoStep, /expected_objective_value.*strictly beats/i);
+  assert.match(autoStep, /local-baseline or transport tests.*decision_information/i);
+  assert.match(autoStep, /non-binding workflow.*lenz_suggest for a shortlist.*lenz_score and\/or lenz_predict/i);
+  assert.match(autoStep, /not a fixed order.*neither score nor predict is mandatory/i);
+  assert.match(autoStep, /interpret the verified Observation before requesting refreshed posterior advice/i);
+  assert.match(autoStep, /do not mechanically repeat.*without new observation or configuration evidence/i);
+  assert.match(autoStep, /repeated action patterns.*change strategy, hypothesis, or search region/i);
+
+  const defaultStep = createStepInstruction({ autonomous: false });
+  for (const tool of ["lenz_diagnostics", "lenz_suggest", "lenz_score", "lenz_predict", "lenz_trials"]) {
+    assert.match(defaultStep, new RegExp(tool));
+  }
+  assert.doesNotMatch(defaultStep, /lenz_candidates/);
+  assert.match(defaultStep, /commit_candidate/);
+  assert.match(defaultStep, /stop_campaign/);
+});
+
 test("autonomous context allowlist excludes paths and ranked proposals", () => {
   const context = sanitizeAutonomousContext({
     state_revision: 2,
     status: { campaign_id: "c", target: "Yield", direction: "maximize", acqf: "noisy_logei", beta: 2, budget: 2, historical_observed: 3, observed: 0, pending: [], budget_remaining: 2, remaining: 10, public_root: "/secret" },
     dataset_summary: { rows: { candidate_pool: 10 } },
+    verified_trials: [
+      { source: "historical", metrics: { Yield: 90 } },
+      { source: "campaign", metrics: { Yield: 80 } },
+    ],
   });
   assert.equal(context.status.acqf, "noisy_logei");
   assert.equal(context.status.public_root, undefined);
   assert.equal(context.suggestions, undefined);
   assert.equal(context.preferred_suggestion, undefined);
   assert.equal(context.declared_provenance, undefined);
+  assert.equal(Object.hasOwn(context, "verified_trials"), false);
+});
+
+test("shadow policy audits autonomous minimal context without ranked suggestions", () => {
+  const context = sanitizeAutonomousContext({
+    state_revision: 2,
+    status: { campaign_id: "c", target: "Yield", direction: "maximize", acqf: "noisy_logei", beta: 2, budget: 2, historical_observed: 3, observed: 0, pending: [], budget_remaining: 2, remaining: 10 },
+    dataset_summary: { rows: { candidate_pool: 10 } },
+  });
+  const commitment = { pool_index: 7, config: { ligand: "PPh3" }, intent: "explore", evidence_sources: ["prior"] };
+
+  const decision = verifyOptimizationPolicy({ commitment, selectedScore: null, context, trajectory: [], manifest: { target: "Yield", direction: "maximize", budget: 2 } });
+
+  assert.equal(Object.hasOwn(context, "suggestions"), false);
+  assert.equal(decision.policy_audit.decision, "allow");
+});
+
+test("autonomous policy recognizes acquisition evidence from pulled proposals", () => {
+  const context = {
+    ...sanitizeAutonomousContext({
+      state_revision: 2,
+      status: { campaign_id: "c", target: "Yield", direction: "maximize", acqf: "noisy_logei", beta: 2, budget: 2, historical_observed: 3, observed: 0, pending: [], budget_remaining: 2, remaining: 10 },
+      dataset_summary: { rows: { candidate_pool: 10 } },
+    }),
+    suggestions: [{ pool_index: 7, config: { ligand: "PPh3" }, acquisition_value: 0.9 }],
+  };
+  const commitment = { pool_index: 7, config: { ligand: "PPh3" }, intent: "optimize", evidence_sources: ["acquisition"] };
+
+  const decision = verifyOptimizationPolicy({ commitment, selectedScore: 0.9, context, trajectory: [], manifest: { target: "Yield", direction: "maximize", budget: 2 } });
+
+  assert.equal(decision.policy_audit.evidence.acquisition, true);
+  assert.ok(!decision.policy_audit.flags.includes("unsupported_commitment"));
 });
 
 test("autonomous context allows only declared experiment provenance", () => {
@@ -187,26 +280,105 @@ test("autonomous tools omit permanent domain mutation and early stop", () => {
   const commitCandidate = actionTools[0];
   const tools = createLenzTools(async () => ({ ok: true, result: [] }), "state", () => {}, () => {}, { autonomous: true }).map((tool) => tool.name);
   assert.deepEqual(actionTools.map((tool) => tool.name), ["commit_candidate"]);
-  for (const field of ["surrogate_trust", "surrogate_trust_rationale", "search_mode"]) assert.ok(commitCandidate.parameters.required.includes(field));
+  for (const field of ["surrogate_trust", "surrogate_trust_rationale", "search_mode", "decision_goal", "result_use"]) assert.ok(commitCandidate.parameters.required.includes(field));
   assert.deepEqual(commitCandidate.parameters.properties.surrogate_trust.anyOf.map((option) => option.const), ["low", "medium", "high"]);
   assert.deepEqual(commitCandidate.parameters.properties.search_mode.anyOf.map((option) => option.const), ["exploit", "targeted_exploration", "global_exploration"]);
+  assert.deepEqual(commitCandidate.parameters.properties.decision_goal.anyOf.map((option) => option.const), ["incumbent_improvement", "decision_information"]);
+  assert.equal(commitCandidate.parameters.properties.expected_objective_value.type, "number");
+  assert.ok(!commitCandidate.parameters.required.includes("expected_objective_value"));
   assert.ok(tools.includes("lenz_candidates"));
   assert.ok(tools.includes("lenz_set_acqf"));
   assert.ok(!tools.some((name) => ["lenz_set_bounds", "lenz_set_objectives", "lenz_set_constraints"].includes(name)));
 });
+test("autonomous typed lenz descriptions preserve evidence semantics", () => {
+  const tools = Object.fromEntries(createLenzTools(async () => ({ ok: true, result: [] }), "state", () => {}, () => {}, { autonomous: true }).map((tool) => [tool.name, tool]));
+
+  assert.match(tools.lenz_suggest.description, /current posterior.*without committing or updating state/i);
+  assert.match(tools.lenz_suggest.description, /repeating.*without a new observation or acquisition\/search change adds no evidence/i);
+  assert.match(tools.lenz_score.description, /acquisition utility.*not a predicted outcome or observation/i);
+  assert.match(tools.lenz_predict.description, /posterior mean and variance.*not acquisition utility or an observation/i);
+  assert.match(tools.lenz_diagnostics.description, /fit and reliability evidence.*does not select candidates/i);
+  assert.match(tools.lenz_trials.description, /verified trials.*Campaign evidence is the default.*historical separately/i);
+  assert.match(tools.lenz_candidates.description, /label-free.*deterministic order.*not ranked evidence/i);
+  assert.match(tools.lenz_set_acqf.description, /persistent|persist/i);
+  assert.match(tools.lenz_set_acqf.description, /audited.*use only with evidence and rationale/i);
+});
+
+test("lenz_trials exposes bounded filters and forwards useful defaults", async () => {
+  const calls = [];
+  const evidence = [];
+  const tools = createLenzTools(async (...args) => {
+    calls.push(args);
+    return { ok: true, result: { trials: [] } };
+  }, "/campaign/frame/state.json", () => {}, (name) => evidence.push(name), { autonomous: true });
+  const trials = tools.find((tool) => tool.name === "lenz_trials");
+
+  assert.deepEqual(trials.parameters.properties.source.anyOf.map((option) => option.const), ["historical", "campaign", "all"]);
+  assert.deepEqual(trials.parameters.properties.status.anyOf.map((option) => option.const), ["observed", "pending", "all"]);
+  assert.equal(trials.parameters.properties.cursor.minimum, 0);
+  assert.equal(trials.parameters.properties.limit.minimum, 1);
+  assert.equal(trials.parameters.properties.limit.maximum, 100);
+  assert.match(trials.description, /page/i);
+  assert.match(trials.description, /historical separately/i);
+
+  await trials.execute("call-1", {});
+  assert.deepEqual(calls.at(-1), ["trials", "--state", "/campaign/frame/state.json", "--source", "campaign", "--status", "observed", "--cursor", "0", "--limit", "20"]);
+  await trials.execute("call-2", { source: "historical", status: "pending", cursor: 5, limit: 100 });
+  assert.deepEqual(calls.at(-1), ["trials", "--state", "/campaign/frame/state.json", "--source", "historical", "--status", "pending", "--cursor", "5", "--limit", "100"]);
+  assert.deepEqual(evidence, ["lenz_trials", "lenz_trials"]);
+});
 
 test("Decision Evidence Record matches actual surrogate use", () => {
-  const base = { pool_index: 7, config: offered[0].config, hypothesis: "plausible chemistry", evidence_sources: ["domain_prior"], expected_outcome: "higher yield", expected_learning: "updates next choice", rationale: "best current tradeoff", surrogate_trust: "medium", surrogate_trust_rationale: "cv_r2 0.5 moderate fit", search_mode: "targeted_exploration" };
+  const base = { pool_index: 7, config: offered[0].config, hypothesis: "plausible chemistry", evidence_sources: ["domain_prior"], expected_outcome: "higher yield", expected_learning: "updates next choice", rationale: "best current tradeoff", surrogate_trust: "medium", surrogate_trust_rationale: "cv_r2 0.5 moderate fit", search_mode: "targeted_exploration", decision_goal: "incumbent_improvement", expected_objective_value: 101, result_use: "Update the incumbent region ranking." };
   assert.equal(validateDecisionEvidence({ ...base, surrogate_relationship: "not_consulted" }, { calls: [] }).decision_evidence_complete, true);
   assert.equal(validateDecisionEvidence({ ...base, surrogate_relationship: "accept" }, { calls: ["lenz_suggest"], proposals: offered }).actual_tool_use.ranked_proposals_consulted, true);
   assert.throws(() => validateDecisionEvidence({ ...base, surrogate_relationship: "not_consulted" }, { calls: ["lenz_score"] }), /informed_without_proposal/);
   assert.throws(() => validateDecisionEvidence({ ...base, surrogate_trust: undefined, surrogate_relationship: "not_consulted" }, { calls: [] }), /surrogate_trust/);
   assert.throws(() => validateDecisionEvidence({ ...base, surrogate_trust: "very_low", surrogate_relationship: "not_consulted" }, { calls: [] }), /surrogate_trust/);
   assert.throws(() => validateDecisionEvidence({ ...base, search_mode: "local", surrogate_relationship: "not_consulted" }, { calls: [] }), /search_mode/);
+  assert.throws(() => validateDecisionEvidence({ ...base, decision_goal: "learn", surrogate_relationship: "not_consulted" }, { calls: [] }), /decision_goal/);
+  assert.throws(() => validateDecisionEvidence({ ...base, result_use: "", surrogate_relationship: "not_consulted" }, { calls: [] }), /result_use/);
+  assert.throws(() => validateDecisionEvidence({ ...base, decision_goal: "decision_information", surrogate_relationship: "not_consulted" }, { calls: [] }), /follow_up_if_supported/);
+  assert.equal(validateDecisionEvidence({ ...base, decision_goal: "decision_information", follow_up_if_supported: "Exploit the supported region.", follow_up_if_refuted: "Return to the incumbent shortlist.", surrogate_relationship: "not_consulted" }, { calls: [] }).decision_evidence_complete, true);
   assert.throws(() => validateDecisionEvidence({ ...base, surrogate_trust: "low", surrogate_trust_rationale: "gp is best", surrogate_relationship: "accept" }, { calls: ["lenz_suggest"], proposals: offered }), /non-surrogate evidence/);
   assert.throws(() => validateDecisionEvidence({ ...base, surrogate_trust: "low", surrogate_trust_rationale: "accept despite low trust because GP rank 1 is best", surrogate_relationship: "accept" }, { calls: ["lenz_suggest"], proposals: offered }), /non-surrogate evidence/);
   assert.equal(validateDecisionEvidence({ ...base, surrogate_trust: "low", surrogate_trust_rationale: "accept despite low trust because the verified receipt supports this region", surrogate_relationship: "accept" }, { calls: ["lenz_suggest"], proposals: offered }).decision_evidence_complete, true);
   assert.equal(validateDecisionEvidence({ ...base, search_mode: "exploit", surrogate_relationship: "not_consulted" }, { calls: [] }).decision_evidence_complete, true);
+});
+
+test("incumbent improvement expected value strictly beats the global verified maximum", () => {
+  const base = { pool_index: 7, config: offered[0].config, hypothesis: "transport a promising local result", evidence_sources: ["observation"], expected_outcome: "higher yield", expected_learning: "tests transport", rationale: "bounded comparison", surrogate_trust: "medium", surrogate_trust_rationale: "verified observations define the region", search_mode: "targeted_exploration", decision_goal: "incumbent_improvement", result_use: "Update the global ranking.", surrogate_relationship: "not_consulted" };
+  const boundary = { verifiedTrials: [{ source: "historical", metrics: { Yield: 90 } }, { source: "campaign", metrics: { Yield: 80 } }], target: "Yield", direction: "maximize" };
+
+  assert.throws(() => validateDecisionEvidence(base, { calls: [] }, boundary), /finite expected_objective_value/);
+  assert.throws(() => validateDecisionEvidence({ ...base, expected_objective_value: Number.NaN }, { calls: [] }, boundary), /finite expected_objective_value/);
+  assert.throws(() => validateDecisionEvidence({ ...base, expected_objective_value: 85 }, { calls: [] }, boundary), /global verified incumbent 90/);
+  assert.throws(() => validateDecisionEvidence({ ...base, expected_objective_value: 90 }, { calls: [] }, boundary), /strictly beat/);
+  assert.equal(validateDecisionEvidence({ ...base, expected_objective_value: 90.1 }, { calls: [] }, boundary).decision_evidence_complete, true);
+});
+
+test("incumbent improvement expected value strictly beats the global verified minimum", () => {
+  const commitment = { pool_index: 7, config: offered[0].config, hypothesis: "reduce loss", evidence_sources: ["observation"], expected_outcome: "lower loss", expected_learning: "updates next choice", rationale: "best current tradeoff", surrogate_trust: "medium", surrogate_trust_rationale: "verified observations define the region", search_mode: "exploit", decision_goal: "incumbent_improvement", result_use: "Update the global ranking.", surrogate_relationship: "not_consulted" };
+  const boundary = { verifiedTrials: [{ source: "historical", metrics: { Loss: 4 } }, { source: "campaign", metrics: { Loss: 7 } }], target: "Loss", direction: "minimize" };
+
+  assert.throws(() => validateDecisionEvidence({ ...commitment, expected_objective_value: 4 }, { calls: [] }, boundary), /strictly beat/);
+  assert.throws(() => validateDecisionEvidence({ ...commitment, expected_objective_value: 5 }, { calls: [] }, boundary), /global verified incumbent 4/);
+  assert.equal(validateDecisionEvidence({ ...commitment, expected_objective_value: 3.9 }, { calls: [] }, boundary).decision_evidence_complete, true);
+});
+
+test("local-baseline transport work falls back to valid decision information", () => {
+  const commitment = { pool_index: 7, config: offered[0].config, hypothesis: "transport a local improvement", evidence_sources: ["observation"], expected_outcome: "beat the matched local baseline", expected_learning: "tests whether the effect transports", rationale: "resolves a bounded comparison", surrogate_trust: "medium", surrogate_trust_rationale: "verified observations define both contexts", search_mode: "targeted_exploration", result_use: "Rerank the transported region.", surrogate_relationship: "not_consulted" };
+  const boundary = { verifiedTrials: [{ source: "historical", metrics: { Yield: 95 } }, { source: "campaign", metrics: { Yield: 60 } }], target: "Yield", direction: "maximize" };
+
+  assert.throws(() => validateDecisionEvidence({ ...commitment, decision_goal: "incumbent_improvement", expected_objective_value: 70 }, { calls: [] }, boundary), /global verified incumbent 95/);
+  assert.equal(validateDecisionEvidence({ ...commitment, decision_goal: "decision_information", follow_up_if_supported: "Test the best transported neighbor.", follow_up_if_refuted: "Return to the global incumbent region." }, { calls: [] }, boundary).decision_evidence_complete, true);
+});
+
+test("incumbent improvement is allowed when no finite global incumbent exists", () => {
+  const commitment = { pool_index: 7, config: offered[0].config, hypothesis: "establish a finite baseline", evidence_sources: ["prior"], expected_outcome: "finite objective", expected_learning: "initializes ranking", rationale: "no finite observations exist", surrogate_trust: "low", surrogate_trust_rationale: "no verified finite observation exists", search_mode: "global_exploration", decision_goal: "incumbent_improvement", expected_objective_value: 1, result_use: "Establish the first incumbent.", surrogate_relationship: "not_consulted" };
+  const boundary = { verifiedTrials: [{ metrics: { Score: null } }, { metrics: { Score: Number.NaN } }, { metrics: {} }], target: "Score", direction: "maximize" };
+
+  assert.equal(validateDecisionEvidence(commitment, { calls: [] }, boundary).decision_evidence_complete, true);
 });
 
 test("candidate inspection enforces 500 returned rows per step", async () => {
@@ -257,6 +429,52 @@ test("shadow policy challenges an unsupported stalled action signature", () => {
   assert.equal(decision.policy_audit.decision, "challenge");
   assert.ok(decision.policy_audit.flags.includes("stalled_policy"));
   assert.match(decision.policy_audit.required_justification.join(" "), /unresolved hypothesis/i);
+});
+
+test("autonomous advisory cautions retry twice then retain the final audited decision", () => {
+  const decision = {
+    pool_index: 99,
+    config: { catalyst: "D", temperature: 20 },
+    policy_audit: {
+      decision: "challenge",
+      flags: ["cross_context_uncovered", "stalled_policy", "scope_overreach", "gp_dissent"],
+      required_justification: ["Explain why this commitment remains worthwhile."],
+    },
+  };
+
+  assert.throws(() => resolveAutonomousPolicyAudit(decision, 1, 3), /policy caution/i);
+  assert.throws(() => resolveAutonomousPolicyAudit(decision, 2, 3), /policy caution/i);
+  const accepted = resolveAutonomousPolicyAudit(decision, 3, 3);
+
+  assert.equal(accepted.pool_index, 99);
+  assert.deepEqual(accepted.policy_audit.flags, decision.policy_audit.flags);
+  assert.deepEqual(accepted.policy_audit.required_justification, decision.policy_audit.required_justification);
+  assert.equal(accepted.policy_audit.advisory_outcome, "exhausted_accepted");
+});
+
+test("competition policy challenge retries twice then accepts the final validated action", () => {
+  const decision = {
+    pool_index: 99,
+    policy_audit: {
+      decision: "challenge",
+      flags: ["middle_global_exploration"],
+      required_justification: ["Use a shortlist candidate or name executable follow-ups."],
+    },
+  };
+
+  assert.throws(() => resolveAutonomousPolicyAudit(decision, 1, 3), /policy caution/i);
+  assert.throws(() => resolveAutonomousPolicyAudit(decision, 2, 3), /policy caution/i);
+  assert.equal(resolveAutonomousPolicyAudit(decision, 3, 3).policy_audit.advisory_outcome, "exhausted_accepted");
+});
+
+test("autonomous policy exhaustion never accepts non-advisory challenges", () => {
+  const decision = { policy_audit: { decision: "challenge", flags: ["unsupported_commitment"] } };
+  assert.throws(() => resolveAutonomousPolicyAudit(decision, 3, 3), /policy challenge.*unsupported_commitment/i);
+});
+
+test("autonomous policy allows a healthy audited decision unchanged", () => {
+  const decision = { policy_audit: { decision: "allow", flags: [] } };
+  assert.equal(resolveAutonomousPolicyAudit(decision, 1, 3), decision);
 });
 
 test("shadow policy allows a productive repeated action signature", () => {
@@ -330,6 +548,424 @@ test("unscored external commitment without evidence is challenged", () => {
 test("allowed policy decision reaches submission", () => {
   const decision = { pool_index: 7, policy_audit: { decision: "allow", flags: [] } };
   assert.equal(requirePolicyAllowance(decision), decision);
+});
+
+test("crossContextCoverage flags a frozen factor with inversion evidence", () => {
+  // halide is frozen for 3 steps while additive is refined; the window shows
+  // the frozen halide value I is strong with ligand L1 (85.9) but weak with
+  // ligand L2 (57.9) — an inversion of the frozen factor across ligand.
+  const trajectory = [
+    { decision: { config: { product: "P", halide: "Br", ligand: "L1", additive: "a0" } }, metrics: { Yield: 55 } },
+    { decision: { config: { product: "P", halide: "I", ligand: "L1", additive: "a1" } }, metrics: { Yield: 70 } },
+    { decision: { config: { product: "P", halide: "I", ligand: "L1", additive: "a2" } }, metrics: { Yield: 85.9 } },
+    { decision: { config: { product: "P", halide: "I", ligand: "L2", additive: "a2" } }, metrics: { Yield: 57.9 } },
+    { decision: { config: { product: "P", halide: "I", ligand: "L1", additive: "a3" } }, metrics: { Yield: 84.9 } },
+    { decision: { config: { product: "P", halide: "I", ligand: "L1", additive: "a4" } }, metrics: { Yield: 82 } },
+  ];
+  const next = { product: "P", halide: "I", ligand: "L1", additive: "a5" };
+  const audit = crossContextCoverage(trajectory, next, "Yield", "maximize");
+
+  assert.ok(audit, "detector should find the inversion");
+  assert.equal(audit.frozen_factor, "halide");
+  assert.equal(audit.value, "I");
+  assert.equal(audit.other_dimension, "ligand");
+  assert.equal(audit.strong_context, "L1");
+  assert.equal(audit.weak_context, "L2");
+  assert.ok(audit.strong_yield - audit.weak_yield >= 20);
+});
+
+test("crossContextCoverage returns null without a frozen factor", () => {
+  // halide is varied in the most recent step, so it is not frozen.
+  const trajectory = [
+    { decision: { config: { product: "P", halide: "I", ligand: "L1", additive: "a1" } }, metrics: { Yield: 70 } },
+    { decision: { config: { product: "P", halide: "Br", ligand: "L1", additive: "a1" } }, metrics: { Yield: 60 } },
+    { decision: { config: { product: "P", halide: "Br", ligand: "L2", additive: "a1" } }, metrics: { Yield: 57.9 } },
+  ];
+  assert.equal(crossContextCoverage(trajectory, { product: "P", halide: "Br", ligand: "L2", additive: "a2" }, "Yield", "maximize"), null);
+});
+
+test("cross-context inversion remains telemetry for autonomous refinement", () => {
+  const trajectory = [
+    { decision: { intent: "optimize", evidence_sources: ["acquisition"], config: { product: "P", halide: "Br", ligand: "L1", additive: "a0" } }, metrics: { Yield: 55 } },
+    { decision: { intent: "optimize", evidence_sources: ["acquisition"], config: { product: "P", halide: "I", ligand: "L1", additive: "a1" } }, metrics: { Yield: 70 } },
+    { decision: { intent: "optimize", evidence_sources: ["acquisition"], config: { product: "P", halide: "I", ligand: "L1", additive: "a2" } }, metrics: { Yield: 85.9 } },
+    { decision: { intent: "optimize", evidence_sources: ["acquisition"], config: { product: "P", halide: "I", ligand: "L2", additive: "a2" } }, metrics: { Yield: 57.9 } },
+    { decision: { intent: "optimize", evidence_sources: ["acquisition"], config: { product: "P", halide: "I", ligand: "L1", additive: "a3" } }, metrics: { Yield: 84.9 } },
+    { decision: { intent: "optimize", evidence_sources: ["acquisition"], config: { product: "P", halide: "I", ligand: "L1", additive: "a4" } }, metrics: { Yield: 82 } },
+  ];
+  const context = {
+    diagnostics: { train_r2: 0.9, cv_r2: 0.8, cv_r2_status: "ok", lengthscales: { additive: 1 } },
+    suggestions: [{ pool_index: 1, config: { product: "P", halide: "I", ligand: "L1", additive: "a5" }, acquisition_value: 0.9 }],
+  };
+  const commitment = { pool_index: 1, config: { product: "P", halide: "I", ligand: "L1", additive: "a5" }, decision_goal: "incumbent_improvement", search_mode: "exploit", evidence_sources: ["acquisition"], result_use: "Update the incumbent." };
+  const decision = verifyOptimizationPolicy({ commitment, selectedScore: 0.9, context, trajectory, manifest: { target: "Yield", direction: "maximize", budget: 40, experiment_policy: "autonomous_agent" } });
+
+  assert.ok(decision.policy_audit.telemetry_flags.includes("cross_context_uncovered"));
+  assert.ok(!decision.policy_audit.flags.includes("cross_context_uncovered"));
+  assert.equal(decision.policy_audit.decision, "allow");
+});
+
+test("policy allows a refinement when the factor is not frozen", () => {
+  const trajectory = [
+    { decision: { intent: "optimize", evidence_sources: ["acquisition"], config: { product: "P", halide: "I", ligand: "L1", additive: "a1" } }, metrics: { Yield: 70 } },
+    { decision: { intent: "optimize", evidence_sources: ["acquisition"], config: { product: "P", halide: "Br", ligand: "L1", additive: "a1" } }, metrics: { Yield: 60 } },
+    { decision: { intent: "optimize", evidence_sources: ["acquisition"], config: { product: "P", halide: "Br", ligand: "L2", additive: "a1" } }, metrics: { Yield: 57.9 } },
+  ];
+  const context = {
+    diagnostics: { train_r2: 0.9, cv_r2: 0.8, cv_r2_status: "ok", lengthscales: { additive: 1 } },
+    suggestions: [{ pool_index: 1, config: { product: "P", halide: "Br", ligand: "L2", additive: "a2" }, acquisition_value: 0.9 }],
+  };
+  const commitment = { pool_index: 1, config: { product: "P", halide: "Br", ligand: "L2", additive: "a2" }, intent: "optimize", evidence_sources: ["acquisition"], expected_learning: "Refine additive under bromide/L2.", result_use: "Update the incumbent." };
+  const decision = verifyOptimizationPolicy({ commitment, selectedScore: 0.9, context, trajectory, manifest: { target: "Yield", direction: "maximize", budget: 40 } });
+
+  assert.ok(!decision.policy_audit.flags.includes("cross_context_uncovered"));
+  assert.equal(decision.policy_audit.decision, "allow");
+});
+
+// halide stays I for the final 4 completed steps while additive is refined, and
+// halide levels Cl/F were decided but never completed — untested counter-evidence
+// the agent is not collecting. Shared by the scope-overreach tests.
+const overreachTrajectory = () => ([
+  { decision: { intent: "optimize", evidence_sources: ["acquisition"], config: { product: "P", halide: "Br", additive: "a0" } }, metrics: { Yield: 60 } },
+  { decision: { intent: "optimize", evidence_sources: ["acquisition"], config: { product: "P", halide: "I", additive: "a1" } }, metrics: { Yield: 65 } },
+  { decision: { intent: "optimize", evidence_sources: ["acquisition"], config: { product: "P", halide: "I", additive: "a2" } }, metrics: { Yield: 70 } },
+  { decision: { intent: "optimize", evidence_sources: ["acquisition"], config: { product: "P", halide: "I", additive: "a3" } }, metrics: { Yield: 72 } },
+  { decision: { intent: "optimize", evidence_sources: ["acquisition"], config: { product: "P", halide: "I", additive: "a4" } }, metrics: { Yield: 74 } },
+  { decision: { intent: "optimize", evidence_sources: ["acquisition"], config: { product: "P", halide: "I", additive: "a5" } }, metrics: { Yield: 76 } },
+  // Decided but never completed: these halide levels are untested counter-evidence.
+  { decision: { intent: "optimize", evidence_sources: ["information"], config: { product: "P", halide: "Cl", additive: "z0" } } },
+  { decision: { intent: "optimize", evidence_sources: ["information"], config: { product: "P", halide: "F", additive: "z0" } } },
+]);
+
+test("scopeOverreach returns null when the factor is not frozen", () => {
+  const trajectory = [
+    { decision: { intent: "optimize", evidence_sources: ["acquisition"], config: { product: "P", halide: "I", additive: "a0" } }, metrics: { Yield: 60 } },
+    { decision: { intent: "optimize", evidence_sources: ["acquisition"], config: { product: "P", halide: "I", additive: "a1" } }, metrics: { Yield: 65 } },
+    { decision: { intent: "optimize", evidence_sources: ["acquisition"], config: { product: "P", halide: "I", additive: "a2" } }, metrics: { Yield: 70 } },
+    { decision: { intent: "optimize", evidence_sources: ["acquisition"], config: { product: "P", halide: "I", additive: "a3" } }, metrics: { Yield: 72 } },
+    { decision: { intent: "optimize", evidence_sources: ["acquisition"], config: { product: "P", halide: "I", additive: "a4" } }, metrics: { Yield: 74 } },
+    { decision: { intent: "optimize", evidence_sources: ["acquisition"], config: { product: "P", halide: "Br", additive: "a5" } }, metrics: { Yield: 60 } },
+  ];
+  // halide changed in the most recent step, so it is not frozen.
+  assert.equal(scopeOverreach(trajectory, { product: "P", halide: "I", additive: "a6" }, "Yield", "maximize"), null);
+});
+
+test("scopeOverreach flags a frozen factor with untested levels", () => {
+  const audit = scopeOverreach(overreachTrajectory(), { product: "P", halide: "I", additive: "a6" }, "Yield", "maximize");
+
+  assert.ok(audit, "detector should find the scope overreach");
+  assert.equal(audit.frozen_factor, "halide");
+  assert.equal(audit.frozen_value, "I");
+  assert.ok(audit.untested_count >= 2, "untested halide levels should exist");
+  assert.ok(audit.factor_levels > audit.untested_count);
+});
+
+test("scopeOverreach strict mode counts levels missing from completed observations against the searchspace", () => {
+  // halide is frozen at I for the final 4 steps; the searchspace admits
+  // halide levels {Br, I, Cl, F} but only Br and I were ever completed, so
+  // Cl and F are untested even though neither was ever decided.
+  const trajectory = [
+    { decision: { config: { product: "P", halide: "Br", additive: "a0" } }, metrics: { Yield: 60 } },
+    { decision: { config: { product: "P", halide: "I", additive: "a1" } }, metrics: { Yield: 65 } },
+    { decision: { config: { product: "P", halide: "I", additive: "a2" } }, metrics: { Yield: 70 } },
+    { decision: { config: { product: "P", halide: "I", additive: "a3" } }, metrics: { Yield: 72 } },
+    { decision: { config: { product: "P", halide: "I", additive: "a4" } }, metrics: { Yield: 74 } },
+    { decision: { config: { product: "P", halide: "I", additive: "a5" } }, metrics: { Yield: 76 } },
+  ];
+  const searchspace = { halide: ["Br", "I", "Cl", "F"], additive: ["a0", "a1", "a2", "a3", "a4", "a5", "a6"] };
+
+  const audit = scopeOverreach(trajectory, { product: "P", halide: "I", additive: "a6" }, "Yield", "maximize", { searchspace });
+
+  assert.ok(audit, "detector should find the strict scope overreach");
+  assert.equal(audit.frozen_factor, "halide");
+  assert.equal(audit.frozen_value, "I");
+  assert.equal(audit.factor_levels, 4, "factor_levels should be the full searchspace count");
+  assert.equal(audit.untested_count, 2, "Cl and F are in the searchspace but never completed");
+});
+
+test("scopeOverreach strict mode counts levels against completed observations, not the recent window", () => {
+  // halide levels Br and I are completed (Br outside the recent window) and
+  // both are in the searchspace, so no halide level is untested in strict mode.
+  const trajectory = [
+    { decision: { config: { product: "P", halide: "Br", additive: "a0" } }, metrics: { Yield: 60 } },
+    { decision: { config: { product: "P", halide: "I", additive: "a1" } }, metrics: { Yield: 65 } },
+    { decision: { config: { product: "P", halide: "I", additive: "a2" } }, metrics: { Yield: 70 } },
+    { decision: { config: { product: "P", halide: "I", additive: "a3" } }, metrics: { Yield: 72 } },
+    { decision: { config: { product: "P", halide: "I", additive: "a4" } }, metrics: { Yield: 74 } },
+    { decision: { config: { product: "P", halide: "I", additive: "a5" } }, metrics: { Yield: 76 } },
+  ];
+  const searchspace = { halide: ["Br", "I"], additive: ["a0", "a1", "a2", "a3", "a4", "a5", "a6"] };
+
+  const audit = scopeOverreach(trajectory, { product: "P", halide: "I", additive: "a6" }, "Yield", "maximize", { searchspace });
+
+  // Br was completed at step 1 (outside the 8-entry window's recent tail);
+  // strict mode uses ALL completed entries, so halide is fully covered.
+  assert.ok(audit === null || audit.frozen_factor !== "halide", "fully covered halide must not be flagged for scope overreach");
+});
+test("scopeOverreach handles numeric candidate_values count in searchspace", () => {
+  const trajectory = [
+    { decision: { config: { product: "P", halide: "Br", additive: "a0" } }, metrics: { Yield: 60 } },
+    { decision: { config: { product: "P", halide: "I", additive: "a1" } }, metrics: { Yield: 65 } },
+    { decision: { config: { product: "P", halide: "I", additive: "a2" } }, metrics: { Yield: 70 } },
+    { decision: { config: { product: "P", halide: "I", additive: "a3" } }, metrics: { Yield: 72 } },
+    { decision: { config: { product: "P", halide: "I", additive: "a4" } }, metrics: { Yield: 74 } },
+    { decision: { config: { product: "P", halide: "I", additive: "a5" } }, metrics: { Yield: 76 } },
+  ];
+  const searchspace = { halide: 4, additive: 7 };
+
+  const audit = scopeOverreach(trajectory, { product: "P", halide: "I", additive: "a6" }, "Yield", "maximize", { searchspace });
+
+  assert.ok(audit, "detector should find the scope overreach with numeric searchspace");
+  assert.equal(audit.frozen_factor, "halide");
+  assert.equal(audit.frozen_value, "I");
+  assert.equal(audit.factor_levels, 4, "factor_levels should match candidate_values count");
+  assert.equal(audit.untested_count, 2, "4 - 2 observed halide levels (Br, I) = 2 untested");
+});
+
+test("scope overreach remains telemetry for autonomous refinement", () => {
+  const trajectory = [
+    { decision: { config: { product: "P", halide: "Br", additive: "a0" } }, metrics: { Yield: 60 } },
+    { decision: { config: { product: "P", halide: "I", additive: "a1" } }, metrics: { Yield: 65 } },
+    { decision: { config: { product: "P", halide: "I", additive: "a2" } }, metrics: { Yield: 70 } },
+    { decision: { config: { product: "P", halide: "I", additive: "a3" } }, metrics: { Yield: 72 } },
+    { decision: { config: { product: "P", halide: "I", additive: "a4" } }, metrics: { Yield: 74 } },
+    { decision: { config: { product: "P", halide: "I", additive: "a5" } }, metrics: { Yield: 76 } },
+  ];
+  const context = {
+    dataset_summary: { features: { product: { role: "context", candidate_values: 1, values: ["P"] }, halide: { role: "decision", candidate_values: 4, values: ["Br", "I", "Cl", "F"] }, additive: { role: "decision", candidate_values: 7, values: ["a0", "a1", "a2", "a3", "a4", "a5", "a6"] } } },
+    diagnostics: { train_r2: 0.9, cv_r2: 0.8, cv_r2_status: "ok", lengthscales: { additive: 1 } },
+    suggestions: [{ pool_index: 1, config: { product: "P", halide: "I", additive: "a6" }, acquisition_value: 0.9 }],
+  };
+  const commitment = { pool_index: 1, config: { product: "P", halide: "I", additive: "a6" }, decision_goal: "incumbent_improvement", search_mode: "exploit", evidence_sources: ["acquisition"], result_use: "Update the incumbent." };
+  const decision = verifyOptimizationPolicy({ commitment, selectedScore: 0.9, context, trajectory, manifest: { target: "Yield", direction: "maximize", budget: 40, experiment_policy: "autonomous_agent" } });
+
+  assert.ok(decision.policy_audit.telemetry_flags.includes("scope_overreach"));
+  assert.ok(!decision.policy_audit.flags.includes("scope_overreach"));
+  assert.equal(decision.policy_audit.scope_overreach.untested_count, 2);
+  assert.equal(decision.policy_audit.decision, "allow");
+});
+test("stagnant scope overreach triggers challenge retry in autonomous mode", () => {
+  const trajectory = [
+    { decision: { intent: "optimize", evidence_sources: ["acquisition"], config: { product: "P", halide: "Br", additive: "a0" } }, metrics: { Yield: 60 } },
+    { decision: { intent: "optimize", evidence_sources: ["acquisition"], config: { product: "P", halide: "I", additive: "a1" } }, metrics: { Yield: 65 } },
+    { decision: { intent: "optimize", evidence_sources: ["acquisition"], config: { product: "P", halide: "I", additive: "a2" } }, metrics: { Yield: 64 } },
+    { decision: { intent: "optimize", evidence_sources: ["acquisition"], config: { product: "P", halide: "I", additive: "a3" } }, metrics: { Yield: 63 } },
+    { decision: { intent: "optimize", evidence_sources: ["acquisition"], config: { product: "P", halide: "I", additive: "a4" } }, metrics: { Yield: 64 } },
+    { decision: { intent: "optimize", evidence_sources: ["acquisition"], config: { product: "P", halide: "I", additive: "a5" } }, metrics: { Yield: 62 } },
+  ];
+  const context = {
+    dataset_summary: {
+      features: {
+        product: { role: "context", candidate_values: 1 },
+        halide: { role: "decision", candidate_values: 4 },
+        additive: { role: "decision", candidate_values: 7 },
+      },
+    },
+    diagnostics: { train_r2: 0.9, cv_r2: 0.8, cv_r2_status: "ok", lengthscales: { additive: 1 } },
+    suggestions: [
+      { pool_index: 2, config: { product: "P", halide: "F", additive: "a0" }, acquisition_value: 0.95 },
+      { pool_index: 1, config: { product: "P", halide: "I", additive: "a6" }, acquisition_value: 0.8 },
+    ],
+  };
+  const commitment = {
+    pool_index: 1,
+    config: { product: "P", halide: "I", additive: "a6" },
+    decision_goal: "incumbent_improvement",
+    search_mode: "exploit",
+    evidence_sources: ["acquisition"],
+    result_use: "Update the incumbent.",
+  };
+  const decision = verifyOptimizationPolicy({
+    commitment,
+    selectedScore: 0.8,
+    context,
+    trajectory,
+    manifest: { target: "Yield", direction: "maximize", budget: 40, experiment_policy: "autonomous_agent" },
+  });
+
+  assert.ok(decision.policy_audit.flags.includes("scope_overreach"));
+  assert.equal(decision.policy_audit.decision, "challenge");
+  assert.equal(decision.policy_audit.scope_overreach.no_improvement, true);
+  assert.match(decision.policy_audit.required_justification.join(" "), /halide=I has been frozen.*without improving the global incumbent/i);
+});
+
+test("scope overreach extracts candidate_values_list and candidate_values from dataset_summary features", () => {
+  const trajectory = [
+    { decision: { config: { product: "P", halide: "Br", additive: "a0" } }, metrics: { Yield: 60 } },
+    { decision: { config: { product: "P", halide: "I", additive: "a1" } }, metrics: { Yield: 65 } },
+    { decision: { config: { product: "P", halide: "I", additive: "a2" } }, metrics: { Yield: 70 } },
+    { decision: { config: { product: "P", halide: "I", additive: "a3" } }, metrics: { Yield: 72 } },
+    { decision: { config: { product: "P", halide: "I", additive: "a4" } }, metrics: { Yield: 74 } },
+    { decision: { config: { product: "P", halide: "I", additive: "a5" } }, metrics: { Yield: 76 } },
+  ];
+  const context = {
+    dataset_summary: {
+      features: {
+        product: { role: "context", candidate_values_list: ["P"] },
+        halide: { role: "decision", candidate_values_list: ["Br", "I", "Cl", "F"] },
+        additive: { role: "decision", candidate_values: 7 },
+      },
+    },
+    diagnostics: { train_r2: 0.9, cv_r2: 0.8, cv_r2_status: "ok", lengthscales: { additive: 1 } },
+    suggestions: [{ pool_index: 1, config: { product: "P", halide: "I", additive: "a6" }, acquisition_value: 0.9 }],
+  };
+  const commitment = {
+    pool_index: 1,
+    config: { product: "P", halide: "I", additive: "a6" },
+    decision_goal: "incumbent_improvement",
+    search_mode: "exploit",
+    evidence_sources: ["acquisition"],
+    result_use: "Update the incumbent.",
+  };
+  const decision = verifyOptimizationPolicy({
+    commitment,
+    selectedScore: 0.9,
+    context,
+    trajectory,
+    manifest: { target: "Yield", direction: "maximize", budget: 40, experiment_policy: "autonomous_agent" },
+  });
+
+  assert.ok(decision.policy_audit.telemetry_flags.includes("scope_overreach"));
+  assert.ok(!decision.policy_audit.flags.includes("scope_overreach"));
+  assert.equal(decision.policy_audit.scope_overreach.untested_count, 2);
+  assert.equal(decision.policy_audit.decision, "allow");
+});
+
+test("gpDissentStreak counts consecutive override decisions", () => {
+  const trajectory = [
+    { step: 1, decision: { config: { x: 1 }, surrogate_relationship: "accept" }, metrics: { Yield: 60 } },
+    { step: 2, decision: { config: { x: 2 }, surrogate_relationship: "override" }, metrics: { Yield: 65 } },
+    { step: 3, decision: { config: { x: 3 }, surrogate_relationship: "override" }, metrics: { Yield: 70 } },
+    { step: 4, decision: { config: { x: 4 }, surrogate_relationship: "accept" }, metrics: { Yield: 72 } },
+    { step: 5, decision: { config: { x: 5 }, surrogate_relationship: "override" }, metrics: { Yield: 74 } },
+    { step: 6, decision: { config: { x: 6 }, surrogate_relationship: "override" }, metrics: { Yield: 76 } },
+  ];
+  // The accept at step 4 breaks the earlier overrides; only the trailing run (steps 5-6) counts.
+  assert.deepEqual(gpDissentStreak(trajectory, { config: { x: 7 } }), { streak: 2, last_step: 6 });
+});
+
+test("policy challenges a scope-overreach refinement", () => {
+  const trajectory = overreachTrajectory();
+  const context = {
+    diagnostics: { train_r2: 0.9, cv_r2: 0.8, cv_r2_status: "ok", lengthscales: { additive: 1 } },
+    suggestions: [{ pool_index: 1, config: { product: "P", halide: "I", additive: "a6" }, acquisition_value: 0.9 }],
+  };
+  const commitment = { pool_index: 1, config: { product: "P", halide: "I", additive: "a6" }, intent: "optimize", evidence_sources: ["acquisition"], expected_learning: "Refine additive under iodide.", result_use: "Update the incumbent." };
+  const decision = verifyOptimizationPolicy({ commitment, selectedScore: 0.9, context, trajectory, manifest: { target: "Yield", direction: "maximize", budget: 40 } });
+
+  assert.ok(decision.policy_audit.flags.includes("scope_overreach"));
+  assert.equal(decision.policy_audit.decision, "challenge");
+  assert.match(decision.policy_audit.required_justification.join(" "), /halide=.*untested level/i);
+});
+
+test("productive low-trust GP override streak remains telemetry", () => {
+  const trajectory = [
+    { step: 1, decision: { config: { x: 1 }, surrogate_relationship: "override" }, metrics: { Yield: 60 } },
+    { step: 2, decision: { config: { x: 2 }, surrogate_relationship: "override" }, metrics: { Yield: 65 } },
+    { step: 3, decision: { config: { x: 3 }, surrogate_relationship: "override" }, metrics: { Yield: 70 } },
+    { step: 4, decision: { config: { x: 4 }, surrogate_relationship: "override" }, metrics: { Yield: 72 } },
+    { step: 5, decision: { config: { x: 5 }, surrogate_relationship: "override" }, metrics: { Yield: 74 } },
+    { step: 6, decision: { config: { x: 6 }, surrogate_relationship: "override" }, metrics: { Yield: 76 } },
+  ];
+  const context = {
+    diagnostics: { train_r2: 0.99, cv_r2: -0.2, cv_r2_status: "ok", lengthscales: { x: 1 } },
+    suggestions: [{ pool_index: 1, config: { x: 7 }, acquisition_value: 0.9 }],
+  };
+  const commitment = { pool_index: 1, config: { x: 7 }, decision_goal: "incumbent_improvement", search_mode: "exploit", surrogate_relationship: "override", evidence_sources: ["receipt"], result_use: "Update the incumbent." };
+  const decision = verifyOptimizationPolicy({ commitment, selectedScore: 0.9, context, trajectory, manifest: { target: "Yield", direction: "maximize", budget: 40, experiment_policy: "autonomous_agent" } });
+
+  assert.equal(decision.policy_audit.gp_dissent.streak, 6);
+  assert.ok(decision.policy_audit.telemetry_flags.includes("gp_dissent"));
+  assert.ok(!decision.policy_audit.flags.includes("gp_dissent"));
+  assert.equal(decision.policy_audit.decision, "allow");
+});
+
+test("low-trust acquisition-best refinement is not challenged as stalled", () => {
+  const trajectory = Array.from({ length: 4 }, (_, index) => ({ decision: { config: { x: index, catalyst: "A" } }, metrics: { Yield: 10 - index } }));
+  const context = {
+    diagnostics: { cv_r2: -0.2, cv_r2_status: "ok" },
+    suggestions: [{ pool_index: 1, config: { x: 4, catalyst: "A" }, acquisition_value: 0.9 }],
+  };
+  const commitment = { pool_index: 1, config: { x: 4, catalyst: "A" }, decision_goal: "incumbent_improvement", search_mode: "exploit", surrogate_trust: "low", result_use: "Update the incumbent." };
+  const decision = verifyOptimizationPolicy({ commitment, selectedScore: 0.9, context, trajectory, manifest: { target: "Yield", direction: "maximize", budget: 40, experiment_policy: "autonomous_agent" } });
+
+  assert.ok(!decision.policy_audit.flags.includes("stalled_policy"));
+  assert.equal(decision.policy_audit.decision, "allow");
+});
+
+test("trusted-surrogate dissent challenge requires declared medium or high trust", () => {
+  const trajectory = Array.from({ length: 4 }, (_, index) => ({ decision: { config: { x: index }, surrogate_relationship: "override" }, metrics: { Yield: index } }));
+  const context = { diagnostics: { cv_r2: 0.8, cv_r2_status: "ok" }, suggestions: [{ pool_index: 1, config: { x: 5 }, acquisition_value: 0.9 }] };
+  const base = { pool_index: 99, config: { x: 99 }, decision_goal: "incumbent_improvement", search_mode: "exploit", surrogate_relationship: "override", result_use: "Update the incumbent." };
+  const manifest = { target: "Yield", direction: "maximize", budget: 40, experiment_policy: "autonomous_agent" };
+
+  const low = verifyOptimizationPolicy({ commitment: { ...base, surrogate_trust: "low" }, selectedScore: 0.1, context, trajectory, manifest });
+  const high = verifyOptimizationPolicy({ commitment: { ...base, surrogate_trust: "high" }, selectedScore: 0.1, context, trajectory, manifest });
+
+  assert.ok(!low.policy_audit.flags.includes("trusted_surrogate_dissent"));
+  assert.ok(high.policy_audit.flags.includes("trusted_surrogate_dissent"));
+});
+
+test("healthy trajectory is allowed without scope or GP-dissent flags", () => {
+  const trajectory = [
+    { step: 1, decision: { intent: "optimize", evidence_sources: ["acquisition"], config: { halide: "I", additive: "a0" }, surrogate_relationship: "accept" }, metrics: { Yield: 60 } },
+    { step: 2, decision: { intent: "optimize", evidence_sources: ["acquisition"], config: { halide: "Br", additive: "a1" }, surrogate_relationship: "accept" }, metrics: { Yield: 65 } },
+    { step: 3, decision: { intent: "optimize", evidence_sources: ["acquisition"], config: { halide: "I", additive: "a2" }, surrogate_relationship: "accept" }, metrics: { Yield: 70 } },
+    { step: 4, decision: { intent: "optimize", evidence_sources: ["acquisition"], config: { halide: "Br", additive: "a3" }, surrogate_relationship: "accept" }, metrics: { Yield: 72 } },
+    { step: 5, decision: { intent: "optimize", evidence_sources: ["acquisition"], config: { halide: "I", additive: "a4" }, surrogate_relationship: "accept" }, metrics: { Yield: 74 } },
+    { step: 6, decision: { intent: "optimize", evidence_sources: ["acquisition"], config: { halide: "Br", additive: "a5" }, surrogate_relationship: "accept" }, metrics: { Yield: 76 } },
+  ];
+  const context = {
+    diagnostics: { train_r2: 0.9, cv_r2: 0.8, cv_r2_status: "ok", lengthscales: { additive: 1 } },
+    suggestions: [{ pool_index: 1, config: { halide: "I", additive: "a6" }, acquisition_value: 0.9 }],
+  };
+  const commitment = { pool_index: 1, config: { halide: "I", additive: "a6" }, intent: "optimize", evidence_sources: ["acquisition"], expected_learning: "Refine additive under iodide.", result_use: "Update the incumbent." };
+  const decision = verifyOptimizationPolicy({ commitment, selectedScore: 0.9, context, trajectory, manifest: { target: "Yield", direction: "maximize", budget: 40 } });
+
+  assert.equal(decision.policy_audit.decision, "allow");
+  assert.ok(!decision.policy_audit.flags.includes("scope_overreach"));
+  assert.ok(!decision.policy_audit.flags.includes("gp_dissent"));
+});
+
+
+test("middle global exploration is challenged for autonomous competition policy", () => {
+  const trajectory = Array.from({ length: 12 }, (_, index) => ({ decision: { config: { x: index } }, metrics: { Score: index } }));
+  const context = { diagnostics: {}, suggestions: [{ pool_index: 1, config: { x: 13 }, acquisition_value: 0.9 }] };
+  const commitment = { pool_index: 99, config: { x: 99 }, decision_goal: "decision_information", search_mode: "global_exploration", follow_up_if_supported: "Exploit x=99 neighbors.", follow_up_if_refuted: "Return to the incumbent.", result_use: "Choose the next region." };
+  const decision = verifyOptimizationPolicy({ commitment, selectedScore: 0.1, context, trajectory, manifest: { target: "Score", direction: "maximize", budget: 40, experiment_policy: "autonomous_agent" } });
+
+  assert.ok(decision.policy_audit.flags.includes("middle_global_exploration"));
+  assert.equal(decision.policy_audit.decision, "challenge");
+});
+
+test("shortlisted middle global exploration still requires executable follow-ups", () => {
+  const trajectory = Array.from({ length: 12 }, (_, index) => ({ decision: { config: { x: index } }, metrics: { Score: index } }));
+  const context = { diagnostics: {}, suggestions: [{ pool_index: 1, config: { x: 13 }, acquisition_value: 0.9 }] };
+  const commitment = { pool_index: 1, config: { x: 13 }, decision_goal: "decision_information", search_mode: "global_exploration", result_use: "Choose the next region." };
+  const decision = verifyOptimizationPolicy({ commitment, selectedScore: 0.9, context, trajectory, manifest: { target: "Score", direction: "maximize", budget: 40, experiment_policy: "autonomous_agent" } });
+
+  assert.ok(decision.policy_audit.flags.includes("middle_global_exploration"));
+  assert.equal(decision.policy_audit.decision, "challenge");
+});
+
+test("late information action requires a remaining follow-up slot", () => {
+  const trajectory = Array.from({ length: 9 }, (_, index) => ({ decision: { config: { x: index } }, metrics: { Score: index } }));
+  const context = { diagnostics: {}, suggestions: [{ pool_index: 1, config: { x: 10 }, acquisition_value: 0.9 }] };
+  const commitment = { pool_index: 1, config: { x: 10 }, decision_goal: "decision_information", search_mode: "targeted_exploration", follow_up_if_supported: "Exploit x=10.", follow_up_if_refuted: "Return to x=8.", result_use: "Choose the final action." };
+  const decision = verifyOptimizationPolicy({ commitment, selectedScore: 0.9, context, trajectory, manifest: { target: "Score", direction: "maximize", budget: 10, experiment_policy: "autonomous_agent" } });
+
+  assert.ok(decision.policy_audit.flags.includes("terminal_information_waste"));
+  assert.equal(decision.policy_audit.decision, "challenge");
+});
+
+test("late outside-shortlist exploration is challenged", () => {
+  const trajectory = Array.from({ length: 8 }, (_, index) => ({ decision: { config: { x: index } }, metrics: { Score: index } }));
+  const context = { diagnostics: {}, suggestions: [{ pool_index: 1, config: { x: 9 }, acquisition_value: 0.9 }] };
+  const commitment = { pool_index: 99, config: { x: 99 }, decision_goal: "decision_information", search_mode: "targeted_exploration", follow_up_if_supported: "Exploit x=99.", follow_up_if_refuted: "Use x=9.", result_use: "Choose the next action." };
+  const decision = verifyOptimizationPolicy({ commitment, selectedScore: 0.1, context, trajectory, manifest: { target: "Score", direction: "maximize", budget: 10, experiment_policy: "autonomous_agent" } });
+
+  assert.ok(decision.policy_audit.flags.includes("late_weak_exploration"));
+  assert.equal(decision.policy_audit.decision, "challenge");
 });
 
 test("acquisition score reuses offered values and scores menu-external candidates", async () => {

@@ -4,13 +4,13 @@ import json
 import os
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
 import typer
 
-from .backend import acquisition_values, diagnostics as model_diagnostics, diverse_candidate_positions, encode_frame, fit_surrogate, posterior_rows
+from .backend import acquisition_values, diagnostics as model_diagnostics, diverse_candidate_positions, encode_frame, fit_surrogate, local_bo_seed, posterior_rows
 from .oracle import verify_receipt
 from .state import Study, Trial, candidate_id, envelope, now
 
@@ -251,12 +251,12 @@ def suggest(
             return
         name = acqf or study.acqf
         q = min(q, len(available))
-        rng = np.random.default_rng(study.seed + len(study.observed))
+        rng = np.random.default_rng(local_bo_seed(study, f"suggest:{name}"))
         if name == "sobol":
             chosen = rng.choice(available, size=q, replace=False)
             result = [{"candidate_id": candidate_id(config_at(candidates, int(index), study.features), int(index)), "pool_index": int(index), "config": config_at(candidates, int(index), study.features), "acqf": "sobol"} for index in chosen]
         else:
-            fitted = fit_surrogate(study, candidates)
+            fitted = fit_surrogate(study, candidates, operation=f"suggest:{name}")
             x = encode_frame(candidates.loc[available, study.features], study)
             scores = acquisition_values(fitted, x, name, beta if beta is not None else study.beta)
             mean, variance = posterior_rows(fitted, x, study.direction)
@@ -467,7 +467,7 @@ def predict(state: Path = typer.Option(...), configs: str = typer.Option(...)) -
         candidates = load_candidates(study)
         parsed = parse_json_list(configs, "configs")
         indices = [find_candidate(study, candidates, item) for item in parsed]
-        fitted = fit_surrogate(study, candidates)
+        fitted = fit_surrogate(study, candidates, operation="predict")
         x = encode_frame(candidates.loc[indices, study.features], study)
         mean, variance = posterior_rows(fitted, x, study.direction)
         emit(command, [{"candidate_id": candidate_id(config), "config": config, "mean": float(mu), "variance": float(var)} for config, mu, var in zip(parsed, mean, variance, strict=True)], study=study)
@@ -489,7 +489,7 @@ def score(
         candidates = load_candidates(study)
         parsed = parse_json_list(configs, "configs")
         indices = [find_candidate(study, candidates, item) for item in parsed]
-        fitted = fit_surrogate(study, candidates)
+        fitted = fit_surrogate(study, candidates, operation=f"score:{acqf or study.acqf}:{beta if beta is not None else study.beta}")
         x = encode_frame(candidates.loc[indices, study.features], study)
         name = acqf or study.acqf
         selected_beta = beta if beta is not None else study.beta
@@ -529,7 +529,7 @@ def diagnostics(state: Path = typer.Option(...)) -> None:
         if cached and all(cached.get(key) == value for key, value in cache_key.items()) and {"cv_r2", "cv_r2_status"} <= cached.get("result", {}).keys():
             result = cached["result"]
         else:
-            result = model_diagnostics(fit_surrogate(study, load_candidates(study)), study)
+            result = model_diagnostics(fit_surrogate(study, load_candidates(study), operation="diagnostics"), study)
             temporary = cache_path.with_suffix(f"{cache_path.suffix}.tmp")
             temporary.write_text(json.dumps({**cache_key, "result": result}))
             os.replace(temporary, cache_path)
@@ -570,11 +570,32 @@ def pareto(state: Path = typer.Option(...)) -> None:
 
 
 @app.command()
-def trials(state: Path = typer.Option(...)) -> None:
+def trials(
+    state: Path = typer.Option(...),
+    source: Literal["historical", "campaign", "all"] | None = typer.Option(None),
+    status: Literal["observed", "pending", "all"] | None = typer.Option(None),
+    cursor: int | None = typer.Option(None, min=0),
+    limit: int | None = typer.Option(None, min=1, max=100),
+) -> None:
     command = "trials"
     try:
         study = load_state(state)
-        emit(command, [vars(trial) for trial in study.all_observed + study.pending], study=study)
+        rows = [vars(trial) for trial in study.all_observed + study.pending]
+        if source is None and status is None and cursor is None and limit is None:
+            emit(command, rows, study=study)
+            return
+        source = source or "all"
+        status = status or "all"
+        cursor = cursor or 0
+        filtered = [row for row in rows if (source == "all" or row["source"] == source) and (status == "all" or row["status"] == status)]
+        page = filtered[cursor:cursor + limit if limit is not None else None]
+        next_cursor = cursor + len(page)
+        emit(command, {
+            "total_matching": len(filtered),
+            "cursor": cursor,
+            "next_cursor": next_cursor if next_cursor < len(filtered) else None,
+            "trials": page,
+        }, study=study)
     except Exception as exc:
         emit(command, error=str(exc))
         raise typer.Exit(1) from exc

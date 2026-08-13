@@ -6,7 +6,7 @@ import { isDeepStrictEqual } from "node:util";
 import { fileURLToPath } from "node:url";
 
 import { createAgentSession, DefaultResourceLoader, getAgentDir, ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
-import { acquisitionScore, autonomousSystemPrompt, campaignResult, createCampaignActionTools, createLenzTools, declaredRunProvenance, enforcePreferredSuggestion, leakagePreflight, lowTrustAcquisition, nearBestCandidates, preferredSuggestion, promptWithTransientRetries, reconcileTrajectory, requireCampaignAction, requireOk, requirePolicyAllowance, requireReceipt, sanitizeAutonomousContext, validateCampaignStatus, validateDecisionEvidence, verifiedTrialFacts, verifyCommitment, verifyOptimizationPolicy, verifyStop } from "./campaign.mjs";
+import { acquisitionScore, autonomousSystemPrompt, campaignResult, createCampaignActionTools, createLenzTools, createRetryPrompt, createStepInstruction, declaredRunProvenance, enforcePreferredSuggestion, leakagePreflight, lowTrustAcquisition, nearBestCandidates, preferredSuggestion, promptWithTransientRetries, reconcileTrajectory, requireCampaignAction, requireOk, requirePolicyAllowance, requireReceipt, resolveAutonomousPolicyAudit, sanitizeAutonomousContext, validateCampaignStatus, validateDecisionEvidence, verifiedTrialFacts, verifyCommitment, verifyOptimizationPolicy, verifyStop } from "./campaign.mjs";
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, "..");
 const argv = process.argv.slice(2);
@@ -104,9 +104,8 @@ const defaultToolContext = async () => {
 const toolContext = async () => {
   if (!autonomous) return defaultToolContext();
   const status = await lenz("status", "--state", state);
-  const trials = await lenz("trials", "--state", state);
   const datasetSummary = JSON.parse(await readFile(resolve(campaign, "dataset-summary.json"), "utf8"));
-  return sanitizeAutonomousContext({ state_revision: status.state_revision, status: requireOk(status, "status"), dataset_summary: datasetSummary, verified_trials: verifiedTrialFacts(requireOk(trials, "trials")), declared_provenance: manifest.normalized_config_hash ? { experiment_name: manifest.experiment_name, experiment_policy: manifest.experiment_policy, declared_config_hash: manifest.normalized_config_hash } : undefined });
+  return sanitizeAutonomousContext({ state_revision: status.state_revision, status: requireOk(status, "status"), dataset_summary: datasetSummary, declared_provenance: manifest.normalized_config_hash ? { experiment_name: manifest.experiment_name, experiment_policy: manifest.experiment_policy, declared_config_hash: manifest.normalized_config_hash } : undefined });
 };
 
 const trajectoryPath = resolve(campaign, "trajectory.json");
@@ -130,8 +129,13 @@ for (const intent of trajectory.filter((entry) => entry.decision && entry.reques
   await submitDecision(intent);
 }
 let context = await toolContext();
-if (!autonomous && context.status.observed === 0) {
-  const desired = lowTrustAcquisition(context.diagnostics);
+if (context.status.observed === 0) {
+  // All policies: cold-start surrogate is untrustworthy (few labels, categorical
+  // kernel degenerates). Steer the first-step acquisition toward a conservative
+  // exploration-acquisition instead of the raw noisy_logei tail. Fetch diagnostics
+  // directly because autonomous context deliberately omits them.
+  const diagnosticsNow = requireOk(await lenz("diagnostics", "--state", state), "diagnostics");
+  const desired = lowTrustAcquisition(diagnosticsNow);
   if (context.status.acqf !== desired.acqf || Number(context.status.beta) !== desired.beta) {
     requireOk(await lenz("set-acqf", "--state", state, "--acqf", desired.acqf, "--beta", String(desired.beta), "--rationale", "Supervisor diagnostic policy"), "set-acqf");
     context = await toolContext();
@@ -198,8 +202,8 @@ let prompt = [
   `Current verified campaign evidence: ${JSON.stringify(context)}`,
   recovered.length ? `Recovered verified observations: ${JSON.stringify(recovered)}.` : "",
   autonomous
-    ? `Choose exactly one unobserved public Candidate. Decide which typed evidence to consult, provide the Decision Evidence Record, and call commit_candidate. Early stop is unavailable.`
-    : `Choose exactly one unobserved public candidate and finish by calling commit_candidate, or call stop_campaign with one verified paper-defined stopping condition. Candidate identity is the complete config plus pool_index. Only identical candidate_id values are replicates.`,
+    ? `${createStepInstruction({ autonomous: true })} Early stop is unavailable.`
+    : `${createStepInstruction({ autonomous: false })} Candidate identity is the complete config plus pool_index. Only identical candidate_id values are replicates.`,
 ].filter(Boolean).join("\n");
 const completedThisRun = [];
 const maxActionAttempts = 3;
@@ -240,12 +244,24 @@ for (let step = context.status.observed; step < manifest.budget; step += 1) {
         };
         break;
       }
-      const commitment = verifyCommitment(action, context.suggestions ?? [], context.verified_trials ?? []);
+      const verifiedTrials = autonomous
+        ? verifiedTrialFacts(requireOk(await lenz("trials", "--state", state), "trials"))
+        : context.verified_trials ?? [];
+      const commitment = verifyCommitment(action, context.suggestions ?? [], verifiedTrials);
       if (autonomous) {
         const page = requireOk(await lenz("candidates", "--state", state, "--cursor", String(commitment.pool_index), "--limit", "1"), "candidates");
         const exact = page.candidates?.[0];
         if (!exact || Number(exact.pool_index) !== Number(commitment.pool_index) || !isDeepStrictEqual(exact.config, commitment.config)) throw new Error("commitment does not match exact public Candidate identity");
-        decision = validateDecisionEvidence({ ...commitment, candidate_id: exact.candidate_id }, turnEvidence);
+        decision = validateDecisionEvidence({ ...commitment, candidate_id: exact.candidate_id }, turnEvidence, { verifiedTrials, target: context.status.target, direction: context.status.direction });
+        const policyContext = { ...context, suggestions: turnEvidence.proposals };
+        const selectedScore = await acquisitionScore(decision, policyContext, async (config) => requireOk(await lenz("score", "--state", state, "--configs", JSON.stringify([config])), "score"));
+        // Autonomous policy cautions request correction while attempts remain,
+        // then preserve the final validated commitment as an advisory outcome.
+        decision = resolveAutonomousPolicyAudit(
+          verifyOptimizationPolicy({ commitment: decision, selectedScore, context: policyContext, trajectory, manifest }),
+          attempt,
+          maxActionAttempts,
+        );
       } else {
         enforcePreferredSuggestion(commitment, context.preferred_suggestion, manifest.budget - context.status.observed);
         const selectedScore = await acquisitionScore(commitment, context, async (config) => requireOk(await lenz("score", "--state", state, "--configs", JSON.stringify([config])), "score"));
@@ -254,13 +270,7 @@ for (let step = context.status.observed; step < manifest.budget; step += 1) {
       break;
     } catch (error) {
       if (attempt === maxActionAttempts) throw error;
-      prompt = [
-        `Your previous campaign action was rejected: ${error.message}`,
-        autonomous
-          ? `Choose an unobserved Candidate, provide a corrected Decision Evidence Record, and call commit_candidate.`
-          : `Choose an unobserved candidate and call commit_candidate, or call stop_campaign with one verified paper-defined stopping condition.`,
-        `Current verified campaign evidence: ${JSON.stringify(context)}.`,
-      ].join("\n");
+      prompt = createRetryPrompt(error, { autonomous });
     }
   }
   if (stopped) break;
@@ -281,13 +291,13 @@ for (let step = context.status.observed; step < manifest.budget; step += 1) {
     `State how this Observation changes your belief before choosing Step ${step + 2}.`,
     `Budget remaining: ${manifest.budget - step - 1}.`,
     `Current verified campaign evidence: ${JSON.stringify(context)}.`,
-    `Choose one unobserved Candidate, provide a new Decision Evidence Record, and call commit_candidate.`,
+    createStepInstruction({ autonomous: true }),
   ].join("\n") : [
     `Verified observation for Trial ${trialId}: ${JSON.stringify(observation.metrics)}.`,
     `Budget remaining: ${manifest.budget - step - 1}.`,
     `Current verified campaign evidence: ${JSON.stringify(context)}.`,
     manifest.budget - step - 1 === 1 ? `Terminal decision: compare every near_best_suggestions candidate before committing. With no later action, maximize the expected final best observed value; do not spend the last evaluation mainly on information or a matched comparison.` : `Interpret the result using exact candidate identities.`,
-    `Finish by calling commit_candidate or stop_campaign exactly once.`,
+    createStepInstruction({ autonomous: false }),
   ].join("\n");
 }
 await writeJsonAtomic(trajectoryPath, trajectory);

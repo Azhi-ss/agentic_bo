@@ -95,6 +95,11 @@ export const createCampaignActionTools = (setAction, { autonomous = false } = {}
     surrogate_trust: Type.Union([Type.Literal("low"), Type.Literal("medium"), Type.Literal("high")]),
     surrogate_trust_rationale: Type.String({ minLength: 1 }),
     search_mode: Type.Union([Type.Literal("exploit"), Type.Literal("targeted_exploration"), Type.Literal("global_exploration")]),
+    decision_goal: Type.Union([Type.Literal("incumbent_improvement"), Type.Literal("decision_information")]),
+    expected_objective_value: Type.Optional(Type.Number()),
+    result_use: Type.String({ minLength: 1 }),
+    follow_up_if_supported: Type.Optional(Type.String({ minLength: 1 })),
+    follow_up_if_refuted: Type.Optional(Type.String({ minLength: 1 })),
     rationale: Type.String({ minLength: 1 }),
   };
   const tools = [defineTool({
@@ -156,7 +161,7 @@ export const createLenzTools = (lenz, state, onMutation = () => {}, onEvidence =
   };
   const tools = [
     defineTool({
-      name: "lenz_suggest", label: "Lenz Suggest", description: "Generate current surrogate proposals without committing.",
+      name: "lenz_suggest", label: "Lenz Suggest", description: "Read the current posterior and propose candidates without committing or updating state. Repeating without a new observation or acquisition/search change adds no evidence.",
       parameters: Type.Object({ q: Type.Optional(Type.Integer({ minimum: 1, maximum: 20 })), acqf: Type.Optional(Type.String()), beta: Type.Optional(Type.Number({ minimum: 0 })), bounds: Type.Optional(Type.Record(Type.String(), Type.Unknown())), around: Type.Optional(Type.Boolean()), radius: Type.Optional(Type.Number({ exclusiveMinimum: 0, maximum: 1 })) }),
       async execute(_id, params) {
         const args = ["suggest", "--state", state, "--q", String(params.q ?? 5)];
@@ -167,9 +172,9 @@ export const createLenzTools = (lenz, state, onMutation = () => {}, onEvidence =
         return tracked("lenz_suggest", await lenz(...args));
       },
     }),
-    defineTool({ name: "lenz_predict", label: "Lenz Predict", description: "Inspect posterior mean and variance for exact public candidates.", parameters: Type.Object({ configs: Type.Array(Type.Record(Type.String(), Type.Unknown()), { minItems: 1 }) }), async execute(_id, params) { return tracked("lenz_predict", await lenz("predict", "--state", state, "--configs", JSON.stringify(params.configs))); } }),
+    defineTool({ name: "lenz_predict", label: "Lenz Predict", description: "Return posterior mean and variance for exact public candidates; these are not acquisition utility or an observation.", parameters: Type.Object({ configs: Type.Array(Type.Record(Type.String(), Type.Unknown()), { minItems: 1 }) }), async execute(_id, params) { return tracked("lenz_predict", await lenz("predict", "--state", state, "--configs", JSON.stringify(params.configs))); } }),
     defineTool({
-      name: "lenz_score", label: "Lenz Score", description: "Score exact public candidates with an acquisition policy.",
+      name: "lenz_score", label: "Lenz Score", description: "Return acquisition utility for exact public candidates; this is not a predicted outcome or observation.",
       parameters: Type.Object({ configs: Type.Array(Type.Record(Type.String(), Type.Unknown()), { minItems: 1 }), acqf: Type.Optional(Type.String()), beta: Type.Optional(Type.Number({ minimum: 0 })) }),
       async execute(_id, params) {
         const args = ["score", "--state", state, "--configs", JSON.stringify(params.configs)];
@@ -180,10 +185,23 @@ export const createLenzTools = (lenz, state, onMutation = () => {}, onEvidence =
         return result(response);
       },
     }),
-    defineTool({ name: "lenz_diagnostics", label: "Lenz Diagnostics", description: "Inspect current surrogate diagnostics.", parameters: Type.Object({}), async execute() { return tracked("lenz_diagnostics", await lenz("diagnostics", "--state", state)); } }),
-    defineTool({ name: "lenz_trials", label: "Lenz Trials", description: "Inspect verified historical and campaign observations.", parameters: Type.Object({}), async execute() { return tracked("lenz_trials", await lenz("trials", "--state", state)); } }),
+    defineTool({ name: "lenz_diagnostics", label: "Lenz Diagnostics", description: "Inspect surrogate fit and reliability evidence; this does not select candidates.", parameters: Type.Object({}), async execute() { return tracked("lenz_diagnostics", await lenz("diagnostics", "--state", state)); } }),
     defineTool({
-      name: "lenz_set_acqf", label: "Lenz Set Acquisition", description: "Persist an audited acquisition policy revision.",
+      name: "lenz_trials",
+      label: "Lenz Trials",
+      description: "Inspect verified trials in bounded pages. Observed Campaign evidence is the default; request historical separately.",
+      parameters: Type.Object({
+        source: Type.Optional(Type.Union([Type.Literal("historical"), Type.Literal("campaign"), Type.Literal("all")])),
+        status: Type.Optional(Type.Union([Type.Literal("observed"), Type.Literal("pending"), Type.Literal("all")])),
+        cursor: Type.Optional(Type.Integer({ minimum: 0 })),
+        limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 100 })),
+      }),
+      async execute(_id, params) {
+        return tracked("lenz_trials", await lenz("trials", "--state", state, "--source", params.source ?? "campaign", "--status", params.status ?? "observed", "--cursor", String(params.cursor ?? 0), "--limit", String(params.limit ?? 20)));
+      },
+    }),
+    defineTool({
+      name: "lenz_set_acqf", label: "Lenz Set Acquisition", description: "Persist an audited acquisition-policy change; use only with evidence and rationale.",
       parameters: Type.Object({ acqf: Type.String({ minLength: 1 }), beta: Type.Optional(Type.Number({ minimum: 0 })), rationale: Type.String({ minLength: 1 }) }),
       async execute(_id, params) {
         const args = ["set-acqf", "--state", state, "--acqf", params.acqf, "--rationale", params.rationale];
@@ -195,7 +213,7 @@ export const createLenzTools = (lenz, state, onMutation = () => {}, onEvidence =
     }),
   ];
   if (autonomous) tools.push(defineTool({
-    name: "lenz_candidates", label: "Lenz Candidates", description: "Inspect label-free public candidates in deterministic pool order.",
+    name: "lenz_candidates", label: "Lenz Candidates", description: "Inspect the label-free public pool in deterministic order; pool order is not ranked evidence.",
     parameters: Type.Object({ filters: Type.Optional(Type.Record(Type.String(), Type.Unknown())), cursor: Type.Optional(Type.Integer({ minimum: 0 })), limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 100 })) }),
     async execute(_id, params) {
       const args = ["candidates", "--state", state, "--cursor", String(params.cursor ?? 0), "--limit", String(params.limit ?? 20)];
@@ -256,6 +274,23 @@ export const requirePolicyAllowance = (decision) => {
   return decision;
 };
 
+const autonomousAdvisoryFlags = new Set(["cross_context_uncovered", "scope_overreach", "gp_dissent", "stalled_policy", "middle_global_exploration", "terminal_information_waste", "late_weak_exploration", "trusted_surrogate_dissent"]);
+
+export const resolveAutonomousPolicyAudit = (decision, attempt, maxAttempts) => {
+  const flags = decision.policy_audit?.flags ?? [];
+  const cautionFlags = flags.filter((flag) => autonomousAdvisoryFlags.has(flag));
+  const hardFlags = flags.filter((flag) => !autonomousAdvisoryFlags.has(flag));
+  if (hardFlags.length) throw new Error(`policy challenge: ${hardFlags.join(", ")}`);
+  if (!cautionFlags.length) return decision;
+  if (attempt < maxAttempts) {
+    throw new Error(`policy caution (${cautionFlags.join(", ")}): ${(decision.policy_audit?.required_justification ?? []).join(" ")}`);
+  }
+  return {
+    ...decision,
+    policy_audit: { ...decision.policy_audit, advisory_outcome: "exhausted_accepted" },
+  };
+};
+
 export const nearBestCandidates = (candidates, tolerance = 1e-5) => {
   const scored = candidates.filter((candidate) => Number.isFinite(candidate.acquisition_value));
   if (!scored.length) return [];
@@ -267,24 +302,39 @@ export const preferredSuggestion = (suggestions) => suggestions[0];
 
 export const lowTrustAcquisition = (diagnostics) =>
   diagnostics.cv_r2_status !== "ok" || !Number.isFinite(diagnostics.cv_r2) || diagnostics.cv_r2 < 0.2
-    ? { acqf: "ucb", beta: 16 }
+    ? { acqf: "ucb", beta: 1 }
     : { acqf: "noisy_logei", beta: 2 };
 
 export const enforcePreferredSuggestion = () => undefined;
 
 export const autonomousSystemPrompt = `You own the final optimization decision.
 
-Inspect the public search space, verified historical observations, domain context, and any typed lenz evidence you consider useful. Surrogate outputs are non-binding advice: you may consult, accept, override, or proceed without ranked proposals.
+Inspect the public search space, verified historical observations, domain context, and any typed lenz evidence you consider useful. On the first step, query verified observations with lenz_trials, including historical observations, before choosing a Candidate. Within each step turn, you may use query tools (lenz_diagnostics, lenz_candidates, lenz_suggest, lenz_score, lenz_predict, lenz_trials) as needed to gather evidence; page lenz_trials and request historical separately when needed. You must finalize your decision with commit_candidate. Surrogate outputs are non-binding advice: you may consult, accept, override, or proceed without ranked proposals. A useful non-binding workflow is to inspect trials and diagnostics, select search_mode from the evidence, use lenz_suggest for a shortlist, and use lenz_score and/or lenz_predict according to whether acquisition utility and/or posterior moments answer your question. This is not a fixed order, and neither score nor predict is mandatory. After commit_candidate, interpret the verified Observation before requesting refreshed posterior advice. Do not mechanically repeat the same query sequence without new observation or configuration evidence. If repeated action patterns do not improve the incumbent or resolve the declared question, change strategy, hypothesis, or search region.
 
 Before choosing a Candidate, you MUST complete a Surrogate Trust Assessment:
 1. Judge surrogate reliability for the CURRENT step. If you have not yet seen diagnostics this step, either call lenz_diagnostics or explicitly state in surrogate_trust_rationale why existing evidence (e.g. a same-region verified Receipt, an unchanged candidate set) makes re-diagnosis unnecessary. Set surrogate_trust to low, medium, or high and justify it in surrogate_trust_rationale with concrete values (cv_r2, train-CV gap, lengthscale boundaries, posterior variance scale) or the explicit no-rediagnosis reason.
 2. Choose search_mode: "exploit" when a verified Observation supports refining a known-good region; "targeted_exploration" when domain priors or observations identify a promising bounded region where surrogate ranking may assist inside it; "global_exploration" when neither observations nor priors justify a region and coverage/uncertainty should dominate.
 3. Match surrogate_relationship to your actual tool use. A low trust judgment does NOT forbid using GP — it means GP mean/rank must not be the sole deciding evidence.
 
-Choose one legal unobserved public Candidate that you judge most valuable for improving the Campaign. Do not access hidden Outcomes, benchmark labels, global-best information, or label-derived statistics.
+Optimize the remaining fixed budget for early incumbent improvement and final best. Use your autonomous judgment to choose the legal unobserved Candidate with the greatest expected Campaign value from verified observations, domain context, and any acquisition evidence you consult. In middle steps, global exploration must be acquisition-shortlisted and have executable supported/refuted follow-ups. In terminal steps, prefer exploit or shortlist-adjacent targeted exploration; an information experiment is valid only when at least one later budget slot can use its result.
 
-Before committing, provide the required Decision Evidence Record (including surrogate_trust, surrogate_trust_rationale, and search_mode) and finish by committing exactly that Candidate.`;
+The global incumbent is the best finite target value across every verified observed trial, including historical observations, in the declared maximize/minimize direction. Set decision_goal to "incumbent_improvement" only when expected_objective_value is a finite value that strictly beats that global incumbent. A transport or local-baseline experiment that may improve its matched context but does not credibly beat the global incumbent is "decision_information" and must provide follow_up_if_supported and follow_up_if_refuted. Always state result_use as the concrete next action or candidate-ranking change caused by the result. Productive local refinement that improves the global incumbent may continue freezing factors; however, when a factor has been held fixed for 3-4 steps without incumbent improvement and other levels remain untested in the search space, do not continue refining inside the same fixed factor; test an unexplored level or select a shortlist candidate that varies it. Cross-context and low-trust override signals are advisory telemetry, not reasons by themselves to abandon productive exploitation.
 
+Every measured outcome is local to its complete experimental context. Do not use a negative result from one context to globally reject a factor, factor level, or candidate family without transport evidence.
+
+Choose one legal unobserved public Candidate that you judge most valuable for improving the Campaign. Do not access hidden Outcomes, benchmark labels, the hidden global optimum, or label-derived statistics.
+
+Before committing, provide the required Decision Evidence Record (including surrogate_trust, surrogate_trust_rationale, search_mode, decision_goal, result_use, and expected_objective_value for incumbent_improvement) and finish by committing exactly that Candidate.`;
+
+export const createStepInstruction = ({ autonomous = false } = {}) =>
+  autonomous
+    ? `Within this step turn, you may use query tools (lenz_diagnostics, lenz_candidates, lenz_suggest, lenz_score, lenz_predict, lenz_trials) as needed to gather evidence; on the first step inspect verified observations, page lenz_trials, and request historical separately. A useful non-binding workflow is to inspect trials and diagnostics, select search_mode from the evidence, use lenz_suggest for a shortlist, and use lenz_score and/or lenz_predict according to whether acquisition utility and/or posterior moments answer your question; this is not a fixed order, and neither score nor predict is mandatory. After commit_candidate, interpret the verified Observation before requesting refreshed posterior advice. Do not mechanically repeat the same query sequence without new observation or configuration evidence. If repeated action patterns do not improve the incumbent or resolve the declared question, change strategy, hypothesis, or search region. Use the best finite target value across all verified observations as the global incumbent. Use your autonomous judgment to choose the legal unobserved Candidate with the greatest expected Campaign value from verified observations, domain context, and any acquisition evidence you consult. Set decision_goal to incumbent_improvement only when expected_objective_value is finite and strictly beats the global incumbent. You must finalize your decision with commit_candidate by providing the complete Decision Evidence Record. Classify local-baseline or transport tests as decision_information unless they credibly beat the global incumbent, and provide executable follow_up_if_supported and follow_up_if_refuted branches for every decision_information action.`
+    : `Within this step turn, you may use query tools (lenz_diagnostics, lenz_suggest, lenz_score, lenz_predict, lenz_trials) as needed to gather evidence, and must finalize your decision with commit_candidate or stop_campaign.`;
+
+export const createRetryPrompt = (error, { autonomous = false } = {}) =>
+  autonomous
+    ? `Your previous campaign action was rejected: ${error.message}. Please correct the Decision Evidence Record or choose a valid candidate and call commit_candidate again.`
+    : `Your previous campaign action was rejected: ${error.message}. Please choose a valid candidate and call commit_candidate again, or call stop_campaign with one verified paper-defined stopping condition.`;
 export const declaredRunProvenance = (manifest, policy) => {
   if (manifest.experiment_policy && manifest.experiment_policy !== policy) {
     throw new Error(`declared experiment policy ${manifest.experiment_policy} does not match runtime policy ${policy}`);
@@ -296,7 +346,7 @@ export const declaredRunProvenance = (manifest, policy) => {
   };
 };
 
-export const sanitizeAutonomousContext = ({ state_revision, status, dataset_summary, verified_trials = [], declared_provenance }) => ({
+export const sanitizeAutonomousContext = ({ state_revision, status, dataset_summary, declared_provenance }) => ({
   state_revision,
   status: {
     campaign_id: status.campaign_id,
@@ -312,7 +362,6 @@ export const sanitizeAutonomousContext = ({ state_revision, status, dataset_summ
     remaining: status.remaining,
   },
   dataset_summary,
-  verified_trials: verified_trials.filter((trial) => trial.source !== "historical"),
   ...(declared_provenance ? { declared_provenance: {
     experiment_name: declared_provenance.experiment_name,
     experiment_policy: declared_provenance.experiment_policy,
@@ -320,8 +369,8 @@ export const sanitizeAutonomousContext = ({ state_revision, status, dataset_summ
   } } : {}),
 });
 
-export const validateDecisionEvidence = (commitment, toolUse) => {
-  for (const field of ["hypothesis", "expected_outcome", "expected_learning", "rationale", "surrogate_trust_rationale"]) {
+export const validateDecisionEvidence = (commitment, toolUse, { verifiedTrials = [], target, direction } = {}) => {
+  for (const field of ["hypothesis", "expected_outcome", "expected_learning", "rationale", "surrogate_trust_rationale", "result_use"]) {
     if (typeof commitment[field] !== "string" || !commitment[field].trim()) throw new Error(`Decision Evidence Record requires ${field}`);
   }
   if (!Array.isArray(commitment.evidence_sources) || !commitment.evidence_sources.length || commitment.evidence_sources.some((value) => typeof value !== "string" || !value.trim())) {
@@ -329,6 +378,20 @@ export const validateDecisionEvidence = (commitment, toolUse) => {
   }
   if (!["low", "medium", "high"].includes(commitment.surrogate_trust)) throw new Error("Decision Evidence Record requires surrogate_trust low|medium|high");
   if (!["exploit", "targeted_exploration", "global_exploration"].includes(commitment.search_mode)) throw new Error("Decision Evidence Record requires search_mode exploit|targeted_exploration|global_exploration");
+  if (!["incumbent_improvement", "decision_information"].includes(commitment.decision_goal)) throw new Error("Decision Evidence Record requires decision_goal incumbent_improvement|decision_information");
+  if (commitment.decision_goal === "incumbent_improvement") {
+    if (!Number.isFinite(commitment.expected_objective_value)) throw new Error("Decision Evidence Record requires finite expected_objective_value for incumbent_improvement");
+    const values = verifiedTrials.map((trial) => trial.metrics?.[target]).filter(Number.isFinite);
+    if (values.length) {
+      const incumbent = direction === "minimize" ? Math.min(...values) : Math.max(...values);
+      if (!improved(commitment.expected_objective_value, incumbent, direction)) throw new Error(`expected_objective_value must strictly beat global verified incumbent ${incumbent} for ${direction}`);
+    }
+  }
+  if (commitment.decision_goal === "decision_information") {
+    for (const field of ["follow_up_if_supported", "follow_up_if_refuted"]) {
+      if (typeof commitment[field] !== "string" || !commitment[field].trim()) throw new Error(`Decision Evidence Record requires ${field} for decision_information`);
+    }
+  }
   const proposed = toolUse.proposals ?? [];
   const consultedProposal = proposed.length > 0;
   const consultedOther = (toolUse.calls ?? []).some((name) => ["lenz_diagnostics", "lenz_predict", "lenz_score"].includes(name));
@@ -363,6 +426,202 @@ const actionSignature = (decision, previousConfig) => ({
 const sameSignature = (left, right) => left.intent === right.intent
   && left.changed_dimensions.length === right.changed_dimensions.length
   && left.changed_dimensions.every((value, index) => value === right.changed_dimensions[index]);
+
+// Detect a local-optimum trap: the agent has frozen one decision factor for
+// several consecutive steps while refining others, and verified observations in
+// the recent window show that frozen factor inverts across another decision
+// dimension (the same value is strong in one context and weak in another).
+// Example: halide yields 85.9 with ligand A but only 57.9 with ligand B; an
+// agent that observed both, then froze halide and kept tuning additive, is
+// stuck refining inside the weak context and never re-tests the strong one.
+// Returns the frozen factor and the cross-context test that would resolve it,
+// or null when the evidence does not support an inversion.
+export const crossContextCoverage = (trajectory, candidateConfig, target, direction, { window = 6, freeze = 3, gap = 20 } = {}) => {
+  const completed = trajectory.filter((entry) => entry.decision?.config && Number.isFinite(entry.metrics?.[target]));
+  if (completed.length < 4) return null;
+  const local = completed.slice(-window);
+  const dims = Object.keys(candidateConfig).filter((key) => candidateConfig[key] !== null);
+  if (dims.length < 2) return null;
+  // Dimensions that vary anywhere in the trajectory (excludes constants like a
+  // single-product context column).
+  const constant = new Set(dims.filter((key) => (
+    completed.every((entry) => entry.decision.config[key] === candidateConfig[key])
+  )));
+  const factorCandidates = dims.filter((key) => !constant.has(key));
+  // A dimension is FROZEN if it has not changed across the last `freeze`
+  // completed steps and the candidate does not change it either.
+  const frozen = new Set();
+  for (const key of factorCandidates) {
+    if (!completed.slice(-freeze).every((entry) => entry.decision.config[key] === candidateConfig[key])) continue;
+    const previous = completed.at(-1).decision.config[key];
+    if (previous === candidateConfig[key]) frozen.add(key);
+  }
+  if (!frozen.size) return null;
+  // Look for an inversion of a frozen factor across another decision dimension.
+  for (const factor of frozen) {
+    for (const other of dims) {
+      if (other === factor) continue;
+      const groups = new Map();
+      for (const entry of local) {
+        const factorValue = entry.decision.config[factor];
+        const otherValue = entry.decision.config[other];
+        if (factorValue === undefined || factorValue === null || otherValue === undefined || otherValue === null) continue;
+        const key = `${factorValue}\u0000${otherValue}`;
+        if (!groups.has(key)) groups.set(key, { factorValue, otherValue, yields: [] });
+        groups.get(key).yields.push(entry.metrics[target]);
+      }
+      const byFactor = new Map();
+      for (const { factorValue, otherValue, yields } of groups.values()) {
+        if (!byFactor.has(factorValue)) byFactor.set(factorValue, new Map());
+        const map = byFactor.get(factorValue);
+        if (!map.has(otherValue)) map.set(otherValue, []);
+        map.get(otherValue).push(...yields);
+      }
+      for (const [factorValue, otherMap] of byFactor) {
+        if (otherMap.size < 2) continue;
+        const maxByOther = [...otherMap.entries()].map(([otherValue, yields]) => [otherValue, Math.max(...yields)]);
+        const [strongContext, strongYield] = maxByOther.reduce((acc, [ov, y]) => (y > acc[1] ? [ov, y] : acc), ["", -Infinity]);
+        const [weakContext, weakYield] = maxByOther.reduce((acc, [ov, y]) => (y < acc[1] ? [ov, y] : acc), ["", Infinity]);
+        if (strongYield - weakYield >= gap) {
+          return {
+            frozen_factor: factor,
+            value: factorValue,
+            other_dimension: other,
+            strong_context: strongContext,
+            weak_context: weakContext,
+            strong_yield: strongYield,
+            weak_yield: weakYield,
+          };
+        }
+      }
+    }
+  }
+  return null;
+};
+
+// Detect scope overreach: a decision factor has been frozen for several
+// consecutive completed steps while other factors are refined, the candidate
+// still holds the frozen value, AND that factor has untested levels that were
+// never observed to completion. The agent is anchoring on one value of the
+// factor without ever generating counter-evidence — a self-closing loop that
+// needs no observed inversion to be harmful, unlike crossContextCoverage.
+// "Untested" has two modes. Proxy mode (default, no searchspace): a level
+// appears in a trajectory decision (e.g. a pending or interrupted trial) but
+// was never completed, so it is counter-evidence the agent is not collecting.
+// Strict mode (searchspace provided as { [factorKey]: level[] }): a level
+// exists in the search space's level list but was never observed to completion
+// anywhere in the trajectory. Returns the frozen factor and its info, or null.
+export const scopeOverreach = (trajectory, candidateConfig, target, direction, { window = 8, freeze = 4, untestedThreshold = 2, searchspace = null } = {}) => {
+  const completed = trajectory.filter((entry) => entry.decision?.config && Number.isFinite(entry.metrics?.[target]));
+  if (completed.length < 6) return null;
+  const recent = completed.slice(-window);
+  const dims = Object.keys(candidateConfig).filter((key) => candidateConfig[key] !== null && candidateConfig[key] !== undefined);
+  if (dims.length < 2) return null;
+  // Dimensions that never vary (e.g. a single-product context column) are not
+  // decision factors the agent can be over-reaching on.
+  const constant = new Set(dims.filter((key) => (
+    completed.every((entry) => entry.decision.config[key] === candidateConfig[key])
+  )));
+  const previous = completed.at(-1).decision.config;
+  const frozen = [];
+  for (const key of dims) {
+    if (constant.has(key)) continue;
+    const lastFreeze = completed.slice(-freeze);
+    if (lastFreeze.length < freeze) continue;
+    if (!lastFreeze.every((entry) => entry.decision.config[key] === candidateConfig[key])) continue;
+    if (previous[key] === candidateConfig[key]) frozen.push(key);
+  }
+  if (!frozen.length) return null;
+  for (const key of frozen) {
+    // Strict mode: the searchspace level list is the ground truth for the
+    // factor's levels; any level never observed to completion (in ANY completed
+    // entry, not just the recent window) is untested counter-evidence. Requires
+    // the full level list, e.g. context.dataset_summary factor values or the
+    // Frame's original_domain. Falls back to the trajectory-only proxy when no
+    // searchspace is available (see doc comment).
+    const searchLevels = searchspace?.[key];
+    let factorLevelsCount;
+    let untestedCount;
+    if (Array.isArray(searchLevels) && searchLevels.length) {
+      const factorLevels = new Set(searchLevels);
+      const observed = new Set(completed.map((entry) => entry.decision.config[key]));
+      factorLevelsCount = factorLevels.size;
+      untestedCount = factorLevelsCount - observed.size;
+    } else if (typeof searchLevels === "number" && Number.isFinite(searchLevels) && searchLevels > 0) {
+      const observed = new Set(completed.map((entry) => entry.decision.config[key]));
+      factorLevelsCount = searchLevels;
+      untestedCount = factorLevelsCount - observed.size;
+    } else {
+      // factor_levels counts every level of the factor touched anywhere in the
+      // trajectory (completed or not); observed_levels counts only completed
+      // observations in the recent window. The gap is untested counter-evidence.
+      const factorLevels = new Set();
+      for (const entry of trajectory) {
+        const value = entry.decision?.config?.[key];
+        if (value === undefined || value === null) continue;
+        factorLevels.add(value);
+      }
+      factorLevels.add(candidateConfig[key]);
+      const observed = new Set(recent.map((entry) => entry.decision.config[key]));
+      factorLevelsCount = factorLevels.size;
+      untestedCount = factorLevelsCount - observed.size;
+    }
+    if (untestedCount < untestedThreshold) continue;
+    const lastImprovement = lastImprovementIndex(completed, target, direction);
+    const noImprovement = lastImprovement === null || lastImprovement < completed.length - freeze;
+    return {
+      frozen_factor: key,
+      frozen_value: String(candidateConfig[key]),
+      untested_count: untestedCount,
+      factor_levels: factorLevelsCount,
+      refined_factor: refinedFactorKey(completed, candidateConfig),
+      no_improvement: noImprovement,
+    };
+  }
+  return null;
+};
+
+// Index of the most recent completed entry that beat the running incumbent, or
+// null when the incumbent never improved.
+const lastImprovementIndex = (completed, target, direction) => {
+  let incumbent = direction === "minimize" ? Infinity : -Infinity;
+  let last = null;
+  completed.forEach((entry, index) => {
+    const value = entry.metrics[target];
+    const isImprovement = direction === "minimize" ? value < incumbent : value > incumbent;
+    if (isImprovement) {
+      incumbent = value;
+      last = index;
+    }
+  });
+  return last;
+};
+
+// The factor the candidate varies relative to the most recent completed entry,
+// or null when the candidate changes more than one factor (or none).
+const refinedFactorKey = (completed, candidateConfig) => {
+  const previous = completed.at(-1).decision.config;
+  const changed = Object.keys(candidateConfig).filter((key) => previous?.[key] !== candidateConfig[key]);
+  return changed.length === 1 ? changed[0] : null;
+};
+
+// Count how many consecutive completed steps ending at the last completed
+// entry explicitly overrode the surrogate's top candidate
+// (decision.surrogate_relationship === "override"). A long streak means the
+// agent has been sealing the loop against the GP's joint search channel.
+export const gpDissentStreak = (trajectory, commitment, { maxStreak = 4 } = {}) => {
+  const completed = trajectory.filter((entry) => entry.decision?.config && Object.values(entry.metrics ?? {}).some(Number.isFinite));
+  let streak = 0;
+  for (let index = completed.length - 1; index >= 0; index -= 1) {
+    if (completed[index].decision.surrogate_relationship !== "override") break;
+    streak += 1;
+  }
+  const lastEntry = completed.at(-1);
+  return {
+    streak,
+    last_step: lastEntry?.step ?? (lastEntry ? completed.length : null),
+  };
+};
 
 export const optimizationPolicy = (context, trajectory, manifest = {}) => {
   const diagnostics = context.diagnostics ?? {};
@@ -448,11 +707,43 @@ export const verifyOptimizationPolicy = ({ commitment, selectedScore, context, t
   const policy = optimizationPolicy(context, trajectory, manifest);
   const factorRun = sameFactorRunLength(trajectory, commitment.config, manifest.target, manifest.direction);
   const actionRun = sameActionRunLength(trajectory, commitment, manifest.target, manifest.direction);
-  const shortlistScores = context.suggestions.map((candidate) => candidate.acquisition_value).filter(Number.isFinite);
+  const crossContext = crossContextCoverage(trajectory, commitment.config, manifest.target, manifest.direction);
+  // The autonomous agent writes evidence_sources as free-form narrative
+  // references (receipt IDs, diagnostics, domain priors) rather than the
+  // controlled label vocabulary ["acquisition","prior","information",
+  // "reconfiguration"]. Its commitment evidence is already strictly validated
+  // by validateDecisionEvidence (non-empty evidence_sources, hypothesis,
+  // expected_learning, surrogate consistency). The unsupported_commitment /
+  // unsupported_override evidence-label checks below are meaningful only for
+  // the non-autonomous policy, where evidence_sources is a controlled enum.
+  const autonomous = manifest.experiment_policy === "autonomous_agent";
+  // Strict scope-overreach mode counts untested factor levels against the real
+  // searchspace level lists or candidate_values count in dataset_summary features.
+  const featureLevels = Object.entries(context.dataset_summary?.features ?? {})
+    .map(([feature, info]) => {
+      const list = (Array.isArray(info?.values) && info.values.length)
+        ? info.values
+        : (Array.isArray(info?.candidate_values_list) && info.candidate_values_list.length)
+          ? info.candidate_values_list
+          : null;
+      if (list) return [feature, list];
+      if (typeof info?.candidate_values === "number" && Number.isFinite(info.candidate_values) && info.candidate_values > 0) {
+        return [feature, info.candidate_values];
+      }
+      return null;
+    })
+    .filter(Boolean);
+  const scope = scopeOverreach(trajectory, commitment.config, manifest.target, manifest.direction, {
+    searchspace: featureLevels.length ? Object.fromEntries(featureLevels) : null,
+  });
+  const dissent = gpDissentStreak(trajectory, commitment);
+  const suggestions = context.suggestions ?? [];
+  const preferred = context.preferred_suggestion ?? preferredSuggestion(suggestions);
+  const shortlistScores = suggestions.map((candidate) => candidate.acquisition_value).filter(Number.isFinite);
   const shortlistBest = shortlistScores.length ? Math.max(...shortlistScores) : null;
-  const isShortlisted = context.suggestions.some((candidate) => candidate.pool_index === Number(commitment.pool_index));
-  const isPreferred = Number(commitment.pool_index) === Number(context.preferred_suggestion?.pool_index)
-    && isDeepStrictEqual(commitment.config, context.preferred_suggestion?.config);
+  const isShortlisted = suggestions.some((candidate) => candidate.pool_index === Number(commitment.pool_index));
+  const isPreferred = Number(commitment.pool_index) === Number(preferred?.pool_index)
+    && isDeepStrictEqual(commitment.config, preferred?.config);
   const scoreAvailable = Number.isFinite(selectedScore);
   const outsideShortlist = scoreAvailable && !isShortlisted && shortlistBest !== null && selectedScore < shortlistBest;
   const evidenceSources = new Set(commitment.evidence_sources ?? []);
@@ -463,23 +754,65 @@ export const verifyOptimizationPolicy = ({ commitment, selectedScore, context, t
     reconfiguration: evidenceSources.has("reconfiguration") || commitment.intent === "reconfigure",
   };
   const flags = [];
+  const telemetryFlags = [];
   const requiredJustification = [];
-  if (!Object.values(evidence).some(Boolean)) flags.push("unsupported_commitment");
-  if (policy.trust === "normal" && outsideShortlist && !evidence.domain_prior && !evidence.information_goal && !evidence.reconfiguration) {
+  if (!autonomous && !Object.values(evidence).some(Boolean)) flags.push("unsupported_commitment");
+  if (!autonomous && policy.trust === "normal" && outsideShortlist && !evidence.domain_prior && !evidence.information_goal && !evidence.reconfiguration) {
     flags.push("unsupported_override");
     requiredJustification.push("What evidence makes overriding the trusted surrogate more valuable than the shortlist?");
   }
-  const quantifiedStallException = policy.trust === "normal" && isShortlisted && selectedScore === shortlistBest;
+  const quantifiedStallException = isShortlisted && selectedScore === shortlistBest;
   if ((actionRun.count >= 3 || factorRun.count >= 3) && Math.max(actionRun.recent_improvements, factorRun.recent_improvements) === 0 && !evidence.reconfiguration && !quantifiedStallException && !isPreferred) {
     flags.push("stalled_policy");
     requiredJustification.push("What unresolved hypothesis remains, and why did the prior observations not resolve it?");
     requiredJustification.push("How will this result change a remaining campaign action?");
   }
+  if (crossContext && !evidence.reconfiguration) {
+    if (autonomous) telemetryFlags.push("cross_context_uncovered");
+    else {
+      flags.push("cross_context_uncovered");
+      const { frozen_factor, value, other_dimension, strong_yield, weak_yield, strong_context, weak_context } = crossContext;
+      requiredJustification.push(`Verified trials show ${frozen_factor}=${value} is context-dependent (${strong_yield.toFixed(2)} with ${other_dimension}=${strong_context}, but only ${weak_yield.toFixed(2)} with ${other_dimension}=${weak_context}), and you have frozen ${frozen_factor} for the last several steps. Which frozen-context re-test of ${frozen_factor}=${value} under ${other_dimension}=${strong_context} would distinguish the regimes, and why is it not worth a budget slot?`);
+    }
+  }
+  if (scope && !evidence.reconfiguration) {
+    if (autonomous) {
+      if (scope.no_improvement && !quantifiedStallException && !isPreferred) {
+        flags.push("scope_overreach");
+        requiredJustification.push(`${scope.frozen_factor}=${scope.frozen_value} has been frozen for the last several steps without improving the global incumbent, while ${scope.untested_count} level(s) of ${scope.frozen_factor} remain unexplored in the search space. Test an unexplored level of ${scope.frozen_factor} or choose a shortlist candidate that varies it.`);
+      } else {
+        telemetryFlags.push("scope_overreach");
+      }
+    } else {
+      flags.push("scope_overreach");
+      requiredJustification.push(`${scope.frozen_factor}=${scope.frozen_value} has been frozen for the last several steps with ${scope.untested_count} untested level(s) of ${scope.frozen_factor} still unexplored. Is a cross-level test of ${scope.frozen_factor} worth a budget slot, and what evidence does the current frozen value generalize?`);
+    }
+  }
+  if (dissent && dissent.streak >= 4 && !evidence.reconfiguration) {
+    if (autonomous) telemetryFlags.push("gp_dissent");
+    else {
+      flags.push("gp_dissent");
+      requiredJustification.push(`The chosen candidate has overridden the surrogate's top acquisition candidate for ${dissent.streak} consecutive steps. What experiment would test the disagreement between your belief and the surrogate's top candidate?`);
+    }
+  }
   const postCommitRemaining = policy.budget.remaining === null ? null : Math.max(0, policy.budget.remaining - 1);
-  const informationOnly = evidence.information_goal && !evidence.acquisition && !evidence.domain_prior;
-  if (policy.budget.stage === "late" && informationOnly && (postCommitRemaining === 0 || !commitment.result_use?.trim())) {
+  const informationGoal = autonomous ? commitment.decision_goal === "decision_information" : evidence.information_goal && !evidence.acquisition && !evidence.domain_prior;
+  const hasFollowUps = Boolean(commitment.follow_up_if_supported?.trim() && commitment.follow_up_if_refuted?.trim());
+  if (autonomous && policy.budget.stage === "middle" && commitment.search_mode === "global_exploration" && (!isShortlisted || !hasFollowUps)) {
+    flags.push("middle_global_exploration");
+    requiredJustification.push("Middle-stage global exploration must be acquisition-shortlisted and name executable supported/refuted follow-up actions.");
+  }
+  if (policy.budget.stage === "late" && informationGoal && (postCommitRemaining === 0 || !commitment.result_use?.trim() || (autonomous && !hasFollowUps))) {
     flags.push("terminal_information_waste");
-    requiredJustification.push("How can the remaining budget exploit the information from this experiment?");
+    requiredJustification.push("How can a later remaining action exploit this experiment's result?");
+  }
+  if (autonomous && policy.budget.stage === "late" && commitment.search_mode !== "exploit" && outsideShortlist) {
+    flags.push("late_weak_exploration");
+    requiredJustification.push("Use a shortlist candidate, exploit the incumbent region, or show a viable next-step use for this outside-shortlist exploration.");
+  }
+  if (autonomous && ["medium", "high"].includes(commitment.surrogate_trust) && dissent?.streak >= 4 && outsideShortlist && commitment.decision_goal !== "decision_information") {
+    flags.push("trusted_surrogate_dissent");
+    requiredJustification.push("Name the concrete experiment and follow-up branches that resolve this trusted-surrogate disagreement.");
   }
   const decision = flags.length ? "challenge" : "allow";
   return {
@@ -489,12 +822,16 @@ export const verifyOptimizationPolicy = ({ commitment, selectedScore, context, t
       decision,
       evidence,
       flags,
+      telemetry_flags: telemetryFlags,
       required_justification: requiredJustification,
       acquisition_score: selectedScore,
       acquisition_rank: Number.isFinite(selectedScore) ? 1 + shortlistScores.filter((score) => score > selectedScore).length : null,
       outside_shortlist: outsideShortlist,
       factor_run: factorRun,
       action_run: actionRun,
+      cross_context: crossContext,
+      scope_overreach: scope,
+      gp_dissent: dissent,
       would_reject: false,
       rejection_reasons: [],
     },

@@ -6,6 +6,7 @@ from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import ANY, patch
 
+import numpy as np
 import pandas as pd
 from boagent.agent_cli import app as agent_app
 from boagent.state import Study, Trial
@@ -87,6 +88,62 @@ class LenzCliContractTest(unittest.TestCase):
             self.assertEqual(status_payload["historical_observed"], 2)
             self.assertEqual(status_payload["observed"], 0)
             self.assertEqual(status_payload["budget_remaining"], 2)
+    def test_trials_bare_command_preserves_complete_legacy_order(self) -> None:
+        with TemporaryDirectory() as directory:
+            state = create_state(Path(directory))
+            study = Study.load(state)
+            study.trials.extend([
+                Trial(trial_id="pending-1", candidate_id="pending", query_index=0, config={"ligand": "PPh3", "base": "KOH"}, status="pending"),
+                Trial(trial_id="observed-1", candidate_id="observed", query_index=1, config={"ligand": "XPhos", "base": "NaHCO3"}, status="observed", metrics={"Yield": 60.0}),
+            ])
+            study.save(state)
+
+            result = runner.invoke(app, ["trials", "--state", str(state)])
+
+            self.assertEqual(result.exit_code, 0, result.output)
+            rows = json.loads(result.output)["result"]
+            self.assertIsInstance(rows, list)
+            self.assertEqual([row["trial_id"] for row in rows], ["historical-0", "historical-1", "observed-1", "pending-1"])
+
+    def test_trials_filters_and_paginates_in_legacy_order(self) -> None:
+        with TemporaryDirectory() as directory:
+            state = create_state(Path(directory))
+            study = Study.load(state)
+            study.trials.extend([
+                Trial(trial_id="pending-1", candidate_id="pending", query_index=0, config={"ligand": "PPh3", "base": "KOH"}, status="pending"),
+                Trial(trial_id="observed-1", candidate_id="observed-1", query_index=1, config={"ligand": "XPhos", "base": "NaHCO3"}, status="observed", metrics={"Yield": 60.0}),
+                Trial(trial_id="observed-2", candidate_id="observed-2", query_index=2, config={"ligand": "PPh3", "base": "NaHCO3"}, status="observed", metrics={"Yield": 70.0}),
+            ])
+            study.save(state)
+
+            first = runner.invoke(app, ["trials", "--state", str(state), "--source", "campaign", "--status", "observed", "--limit", "1"])
+            second = runner.invoke(app, ["trials", "--state", str(state), "--source", "campaign", "--status", "observed", "--cursor", "1", "--limit", "100"])
+
+            self.assertEqual(first.exit_code, 0, first.output)
+            self.assertEqual(json.loads(first.output)["result"], {
+                "total_matching": 2,
+                "cursor": 0,
+                "next_cursor": 1,
+                "trials": [vars(study.trial("observed-1"))],
+            })
+            self.assertEqual(json.loads(second.output)["result"], {
+                "total_matching": 2,
+                "cursor": 1,
+                "next_cursor": None,
+                "trials": [vars(study.trial("observed-2"))],
+            })
+
+            pending = runner.invoke(app, ["trials", "--state", str(state), "--status", "pending"])
+            empty = runner.invoke(app, ["trials", "--state", str(state), "--source", "historical", "--status", "pending", "--cursor", "3"])
+            self.assertEqual([row["trial_id"] for row in json.loads(pending.output)["result"]["trials"]], ["pending-1"])
+            self.assertEqual(json.loads(empty.output)["result"], {"total_matching": 0, "cursor": 3, "next_cursor": None, "trials": []})
+
+    def test_trials_rejects_invalid_filters_and_pagination(self) -> None:
+        with TemporaryDirectory() as directory:
+            state = create_state(Path(directory))
+            for args in (["--source", "other"], ["--status", "other"], ["--cursor", "-1"], ["--limit", "0"], ["--limit", "101"]):
+                result = runner.invoke(app, ["trials", "--state", str(state), *args])
+                self.assertNotEqual(result.exit_code, 0, result.output)
 
     def test_submit_budget_counts_only_campaign_observations(self) -> None:
         with TemporaryDirectory() as directory:
@@ -222,6 +279,20 @@ class LenzCliContractTest(unittest.TestCase):
             self.assertEqual(payload["posterior_variance"], 4.0)
             self.assertEqual(payload["acquisition_value"], 1.25)
             self.assertEqual(payload["acqf"], "ucb")
+    def test_suggest_is_stable_for_same_state_and_seed_despite_process_rng_changes(self) -> None:
+        with TemporaryDirectory() as directory:
+            state = create_state(Path(directory))
+
+            torch.manual_seed(1)
+            np.random.seed(1)
+            first = runner.invoke(app, ["suggest", "--state", str(state), "--q", "2"])
+            torch.manual_seed(999)
+            np.random.seed(999)
+            second = runner.invoke(app, ["suggest", "--state", str(state), "--q", "2"])
+
+            self.assertEqual(first.exit_code, 0, first.output)
+            self.assertEqual(second.exit_code, 0, second.output)
+            self.assertEqual(json.loads(first.output)["result"], json.loads(second.output)["result"])
 
     def test_run_forwards_autonomous_profile_without_changing_default(self) -> None:
         with TemporaryDirectory() as directory:
