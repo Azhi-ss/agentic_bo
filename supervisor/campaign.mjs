@@ -162,13 +162,14 @@ export const createLenzTools = (lenz, state, onMutation = () => {}, onEvidence =
   const tools = [
     defineTool({
       name: "lenz_suggest", label: "Lenz Suggest", description: "Read the current posterior and propose candidates without committing or updating state. Repeating without a new observation or acquisition/search change adds no evidence.",
-      parameters: Type.Object({ q: Type.Optional(Type.Integer({ minimum: 1, maximum: 20 })), acqf: Type.Optional(Type.String()), beta: Type.Optional(Type.Number({ minimum: 0 })), bounds: Type.Optional(Type.Record(Type.String(), Type.Unknown())), around: Type.Optional(Type.Boolean()), radius: Type.Optional(Type.Number({ exclusiveMinimum: 0, maximum: 1 })), pure_rank: Type.Optional(Type.Boolean()) }),
+      parameters: Type.Object({ q: Type.Optional(Type.Integer({ minimum: 1, maximum: 20 })), acqf: Type.Optional(Type.String()), beta: Type.Optional(Type.Number({ minimum: 0 })), bounds: Type.Optional(Type.Record(Type.String(), Type.Unknown())), around: Type.Optional(Type.Boolean()), radius: Type.Optional(Type.Number({ exclusiveMinimum: 0, maximum: 1 })), around_spec: Type.Optional(Type.Record(Type.String(), Type.Unknown())), pure_rank: Type.Optional(Type.Boolean()) }),
       async execute(_id, params) {
         const args = ["suggest", "--state", state, "--q", String(params.q ?? 5)];
         if (params.acqf) args.push("--acqf", params.acqf);
         if (params.beta !== undefined) args.push("--beta", String(params.beta));
         if (params.bounds) args.push("--bounds", JSON.stringify(params.bounds));
-        if (params.around) args.push("--around", "--radius", String(params.radius ?? 0.1));
+        if (params.around_spec) args.push("--around-spec", JSON.stringify(params.around_spec));
+        else if (params.around) args.push("--around", "--radius", String(params.radius ?? 0.1));
         if (params.pure_rank) args.push("--pure-rank");
         return tracked("lenz_suggest", await lenz(...args));
       },
@@ -840,15 +841,31 @@ export const verifyOptimizationPolicy = ({ commitment, selectedScore, context, t
 };
 
 export const replayOptimizationPolicy = (trajectory, contexts, manifest) => trajectory.map((entry, index) => {
-  const context = contexts[index];
-  if (!context) throw new Error(`missing policy context for step ${entry.step ?? index + 1}`);
+  const step = entry.step ?? index + 1;
+  const persisted = entry.decision?.policy_audit ?? entry.policy_audit;
+  if (persisted) return { step, status: "scored", ...persisted };
+  const context = contexts?.[index];
+  if (!context) return { step, status: "unscored", pool_index: entry.decision?.pool_index };
   const offered = context.suggestions.find((candidate) => candidate.pool_index === Number(entry.decision.pool_index));
   const selectedScore = offered?.acquisition_value;
   if (!Number.isFinite(selectedScore)) {
-    return { step: entry.step ?? index + 1, status: "unscored", pool_index: entry.decision.pool_index };
+    return { step, status: "unscored", pool_index: entry.decision.pool_index };
   }
   const decision = verifyOptimizationPolicy({ commitment: entry.decision, selectedScore, context, trajectory: trajectory.slice(0, index), manifest });
-  return { step: entry.step ?? index + 1, status: "scored", ...decision.policy_audit };
+  return { step, status: "scored", ...decision.policy_audit };
+});
+
+export const policyAuditSummary = (audit) => ({
+  decision: audit.decision,
+  flags: audit.flags,
+  telemetry_flags: audit.telemetry_flags,
+  required_justification: audit.required_justification,
+  trust: audit.trust,
+  phase: audit.phase,
+  budget: audit.budget,
+  acquisition_score: audit.acquisition_score,
+  acquisition_rank: audit.acquisition_rank,
+  outside_shortlist: audit.outside_shortlist,
 });
 
 export const verifiedTrialFacts = (trials) => trials.map((trial) => ({
