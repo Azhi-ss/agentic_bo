@@ -14,7 +14,8 @@ import torch
 import pandas as pd
 import typer
 from dotenv import load_dotenv
-from .experiment_config import load_experiment_config
+from .competition import COMPETITION_SEEDS, package_competition
+from .experiment_config import LoadedExperiment, load_experiment_config
 
 from .state import Study
 
@@ -186,10 +187,106 @@ def run(
     run_campaign(campaign, model, thinking, policy)
 
 
-@app.command()
-def experiment(config: Path = typer.Option(...), plan: bool = typer.Option(False, "--plan")) -> None:
+def validate_experiment_campaign(campaign: Path, loaded: LoadedExperiment, item: dict[str, object]) -> None:
+    required = (campaign / "manifest.json", campaign / "frame" / "state.json", campaign / ".receipt-key")
+    missing = next((path for path in required if not path.is_file()), None)
+    if missing:
+        raise typer.BadParameter(f"existing campaign is missing required file: {missing.relative_to(campaign)}")
     try:
-        loaded = load_experiment_config(config, check_output_collisions=not plan)
+        manifest = json.loads(required[0].read_text())
+        if not isinstance(manifest, dict):
+            raise ValueError("manifest root must be an object")
+        study = Study.load(required[1])
+    except (OSError, UnicodeError, json.JSONDecodeError, TypeError, KeyError, ValueError) as exc:
+        raise typer.BadParameter(f"existing campaign metadata is malformed: {exc}") from exc
+
+    acquisition = item["initial_acquisition"]
+    provenance = {
+        "experiment_name": item["experiment_name"],
+        "experiment_policy": item["policy"],
+        "source_config": loaded.config_path.name,
+        "source_config_hash": loaded.source_config_hash,
+        "normalized_config_hash": loaded.normalized_config_hash,
+    }
+    manifest_expected = {
+        "dataset_root": str(loaded.dataset_path),
+        "seed": item["seed"],
+        "budget": item["budget"],
+        "target": item["target"],
+        "direction": item["direction"],
+    }
+    frame_expected = {
+        "public_root": str(loaded.dataset_path),
+        "seed": item["seed"],
+        "budget": item["budget"],
+        "target": item["target"],
+        "direction": item["direction"],
+    }
+    if manifest.get("campaign_id") != study.campaign_id:
+        raise typer.BadParameter("existing campaign mismatch: campaign_id")
+    for field, expected in manifest_expected.items():
+        if manifest.get(field) != expected:
+            raise typer.BadParameter(f"existing campaign manifest mismatch: {field}")
+    for field, expected in frame_expected.items():
+        if getattr(study, field) != expected:
+            raise typer.BadParameter(f"existing campaign Frame mismatch: {field}")
+
+    manifest_provenance = {**provenance, "initial_runtime": {"acqf": acquisition["name"], "beta": acquisition["beta"]}}
+    frame_provenance = {
+        "experiment_name": provenance["experiment_name"],
+        "experiment_policy": provenance["experiment_policy"],
+        "source_config": provenance["source_config"],
+        "source_config_hash": provenance["source_config_hash"],
+        "declared_config_hash": provenance["normalized_config_hash"],
+        "initial_acquisition": {"acqf": acquisition["name"], "beta": acquisition["beta"], "origin": "experiment_config"},
+    }
+    declared = [
+        *(manifest.get(field) for field in provenance),
+        *(getattr(study, field) for field in ("experiment_name", "experiment_policy", "source_config", "source_config_hash", "declared_config_hash")),
+    ]
+    if all(value is None for value in declared):
+        if manifest.get("initial_runtime") is not None or study.initial_acquisition is not None or study.configuration_revision != 1 or study.acqf != acquisition["name"] or study.beta != acquisition["beta"]:
+            raise typer.BadParameter("existing legacy campaign mismatch: initial acquisition")
+        audit_path = campaign / "campaign-run-config.json"
+        try:
+            revisions = json.loads(audit_path.read_text())["revisions"]
+            latest = revisions[-1]
+            if not isinstance(latest, dict):
+                raise TypeError("latest revision must be an object")
+        except (OSError, UnicodeError, json.JSONDecodeError, TypeError, KeyError, IndexError) as exc:
+            raise typer.BadParameter("existing legacy campaign run audit is missing or malformed") from exc
+        audit_expected = {
+            "campaign_id": study.campaign_id,
+            "provider": item["provider"],
+            "model": item["model"],
+            "thinking": item["thinking"],
+            "policy": item["policy"],
+            "provider_generation_seed": item["provider_generation_seed"],
+            "declared_config_hash": None,
+            "experiment_name": None,
+            "experiment_policy": item["policy"],
+        }
+        for field, expected in audit_expected.items():
+            if latest.get(field) != expected:
+                raise typer.BadParameter(f"existing legacy campaign run audit mismatch: {field}")
+        return
+
+    for field, expected in manifest_provenance.items():
+        if manifest.get(field) != expected:
+            raise typer.BadParameter(f"existing campaign manifest mismatch: {field}")
+    for field, expected in frame_provenance.items():
+        if getattr(study, field) != expected:
+            raise typer.BadParameter(f"existing campaign Frame mismatch: {field}")
+
+
+@app.command()
+def experiment(
+    config: Path = typer.Option(...),
+    plan: bool = typer.Option(False, "--plan"),
+    resume: bool = typer.Option(False, "--resume"),
+) -> None:
+    try:
+        loaded = load_experiment_config(config, check_output_collisions=not (plan or resume))
     except (ValueError, FileExistsError) as exc:
         raise typer.BadParameter(str(exc)) from exc
     public_plan = loaded.public_plan()
@@ -206,18 +303,24 @@ def experiment(config: Path = typer.Option(...), plan: bool = typer.Option(False
             "normalized_config_hash": loaded.normalized_config_hash,
         }
         acquisition = item["initial_acquisition"]
-        initialize_campaign(
-            loaded.dataset_path,
-            campaign,
-            int(item["seed"]),
-            int(item["budget"]),
-            str(item["target"]),
-            str(item["direction"]),
-            provenance,
-            {"acqf": acquisition["name"], "beta": acquisition["beta"]},
-        )
+        if campaign.exists():
+            if not resume:
+                raise typer.BadParameter(f"output already exists: {campaign}")
+            validate_experiment_campaign(campaign, loaded, item)
+        else:
+            initialize_campaign(
+                loaded.dataset_path,
+                campaign,
+                int(item["seed"]),
+                int(item["budget"]),
+                str(item["target"]),
+                str(item["direction"]),
+                provenance,
+                {"acqf": acquisition["name"], "beta": acquisition["beta"]},
+            )
         run_campaign(campaign, model=str(item["model"]), thinking=str(item["thinking"]), policy=str(item["policy"]))
     typer.echo(json.dumps({"ok": True, "campaigns": len(public_plan["runs"]), "normalized_config_hash": loaded.normalized_config_hash}, ensure_ascii=False))
+
 
 
 @app.command()
@@ -268,6 +371,23 @@ def export(campaign: Path = typer.Option(...), output: Path = typer.Option(...))
         payload["stop"] = stop
     torch.save(payload, output)
     typer.echo(json.dumps({"ok": True, "output": str(output), "evaluations": len(trajectory), "stop": stop}, ensure_ascii=False))
+
+
+@app.command("package-competition")
+def package_competition_command(
+    config: Path = typer.Option(...),
+    destination: Path = typer.Option(...),
+    seed: list[int] | None = typer.Option(None, "--seed"),
+) -> None:
+    try:
+        loaded = load_experiment_config(config, check_output_collisions=False)
+        requested = tuple(seed) if seed else COMPETITION_SEEDS
+        report = package_competition(loaded, destination, requested)
+    except (ValueError, FileExistsError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    typer.echo(json.dumps(report, ensure_ascii=False, sort_keys=True))
+    if not report["ok"]:
+        raise typer.Exit(1)
 
 
 if __name__ == "__main__":

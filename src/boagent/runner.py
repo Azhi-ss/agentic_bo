@@ -91,7 +91,7 @@ def run_campaign(dataset_root: Path, output: Path, seed: int, budget: int, model
         from .backend import acquisition_values, encode_frame, fit_surrogate, posterior_rows
         import numpy as np
 
-        fitted = fit_surrogate(study, candidates)
+        fitted = fit_surrogate(study, candidates, operation=f"runner:suggest:{study.acqf}")
         x = encode_frame(candidates.loc[available, features], study)
         scores = acquisition_values(fitted, x, study.acqf, study.beta)
         mean, variance = posterior_rows(fitted, x, study.direction)
