@@ -52,6 +52,10 @@ Spend the whole budget by default. Stop early only when the incumbent reached th
 
 Choose each move from the evidence: surrogate trust, domain priors, and what the last result changed. Global exploration, local refinement, and domain restriction are decisions you own.
 
+For local refinement around the current incumbent:
+- `suggest --around --radius R` narrows every numeric dimension and pins choice dimensions at the incumbent.
+- `suggest --around-spec '{"Knob":{"fix":0.1},"Choice":["a","b"]}'` pins some dimensions, restricts others to a listed subset, and pins omitted dimensions at the incumbent. Use the list form on all-categorical spaces, where plain `--around` can return an empty menu.
+
 ## Anti-patterns
 
 - Cataloguing priors instead of committing a first point.

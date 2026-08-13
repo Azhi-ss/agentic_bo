@@ -22,6 +22,23 @@ uv run lenz suggest --state ./state.json --q 8 --acqf ucb --beta 2.0
 
 `suggest` is a pure read. It returns a menu of unevaluated candidates with `query_index`, exact `config`, posterior mean/variance when available, and acquisition score. It records nothing and spends no evaluation budget.
 
+### Temporary search steering
+
+```bash
+uv run lenz suggest --state ./state.json --bounds '{"Reactant2":["1-bromo-4-ethylbenzene"]}'
+uv run lenz suggest --state ./state.json --around --radius 0.1
+uv run lenz suggest --state ./state.json --around-spec '{"Ligand":{"fix":"XPhos"},"Reactant2":["1-bromo-4-ethylbenzene","1-chloro-4-ethylbenzene"]}'
+```
+
+- `--bounds` restricts this call to a region inside the original domain; it does not persist.
+- `--around --radius R` refines locally around the current incumbent: numeric dimensions are narrowed to `[incumbent - R*width, incumbent + R*width]` clamped to the domain, choice dimensions are pinned at the incumbent.
+- `--around-spec` takes a per-dimension object for finer control:
+  - a list restricts that dimension to the listed values (`"Reactant2":["a","b"]`);
+  - `{"fix": value}` pins that dimension;
+  - a number sets the local radius for that numeric dimension;
+  - omitted dimensions are pinned at the incumbent.
+- On an all-categorical space, plain `--around` pins every dimension and can return an empty menu; use `--around-spec` with a list to keep the search nonempty.
+
 ## Submit and observe
 
 ```bash
