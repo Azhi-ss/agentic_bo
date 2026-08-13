@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "skills": {
+    "status-report": {
+      "source": "anthropics/knowledge-work-plugins",
+      "sourceType": "github",
+      "skillPath": "operations/skills/status-report/SKILL.md",
+      "computedHash": "b7de4a8b2bb02a8adee4f8c7a41ae7e20edb8529dae3997bd5ff86b8a9ecf0e7"
+    },
+    "weekly-report": {
+      "source": "claude-office-skills/skills",
+      "sourceType": "github",
+      "skillPath": "weekly-report/SKILL.md",
+      "computedHash": "090dc136f2afde6f5904221efa9456b39fe40332a267241d0701a9de4d31039e"
+    }
+  }
+}
