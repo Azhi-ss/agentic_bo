@@ -51,3 +51,25 @@ Added strict matrix-only YAML experiment configuration, config-backed planning/e
 ### Status
 
 [OK] **Completed**
+
+
+## Session 3: Repair autonomous BO policy auditing
+
+**Date**: 2026-08-13
+**Task**: Repair autonomous BO policy auditing
+**Branch**: `experiment/competition-score-policy`
+
+### Summary
+
+Decoupled runtime autonomous policy mode from manifest inference so live campaigns correctly run as autonomous. Modified policy audit to reduce false-positive challenges by checking valid decision goals and follow-up branches rather than just GP override shapes.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `97d6447` | (see git log) |
+| `89ec4e5` | (see git log) |
+
+### Status
+
+[OK] **Completed**
