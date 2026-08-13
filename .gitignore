@@ -1,29 +1,51 @@
+# ===== Secrets =====
+# Real credentials never tracked; .env.example is the documented template.
 .env
 .env.*
 !.env.example
+.receipt-key
+.pi/
+MISSION.md
+NOTES.md
+RESOURCES.md
+
+# ===== Python =====
 .venv/
 __pycache__/
 *.py[cod]
 .pytest_cache/
 .ruff_cache/
-results/
+*.egg-info/
+build/
+dist/
+
+# ===== Node =====
+supervisor/node_modules/
+
+# ===== Runtime outputs (never committed) =====
 runs/
+results/
 state.json
 *.pt
-
-.receipt-key
-supervisor/node_modules/
 trace2zh/
-.pi/
 benchmark/*/
+ai4scompetition/
 references/
 周汇报-SARA架构与Seed900分析/
-ai4scompetition/
 
-# Local teaching workspace
-MISSION.md
-NOTES.md
-RESOURCES.md
+# ===== Local / machine-specific =====
+# VSCode / JetBrains
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Trellis skill references (locally resolved, not committed)
+.agents/skills/*/references/
+.claude/skills/*/references/
+.omp/skills/*/references/
+
+# ===== Local teaching workspace =====
 assets/
 learning-records/
 lessons/
