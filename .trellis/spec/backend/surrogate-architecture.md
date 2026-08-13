@@ -71,3 +71,28 @@ fit_gpytorch_mll(ExactMarginalLogLikelihood(model.likelihood, model))
 seed = local_bo_seed(study, "diagnostics:fit")
 model = _fit_surrogate_model(train_x, train_y, seed)
 ```
+
+---
+
+## Scenario: GP Surrogate Fit Configuration (kernel, MLE optimizer)
+
+### 1. Scope / Trigger
+
+- Trigger: documenting or auditing what surrogate class, kernel, outcome transform, and parameter-fit optimizer the local GP uses, or comparing it against the paper's stated backend.
+
+### 2. Contracts
+
+- Model class is BoTorch `MixedSingleTaskGP` (paper: "GP surrogate with a Matérn kernel" — BoTorch's default `MaternKernel`); all input dimensions are treated as categorical (`cat_dims=list(range(d))`), matching the paper's input normalization to the unit cube via per-feature category encoding, with output standardization through `Standardize(m=1)`.
+- Kernel parameters (per-dimension `lengthscale`, `noise`, `outputscale`) are learned **dynamically per fit** by maximum-likelihood estimation (MLE) over the current observed data (`study.initial` + `all_observed`); they are not fixed constants and not agent-settable (no `set-lengthscale` tool exists).
+- MLE is performed by `fit_gpytorch_mll(ExactMarginalLogLikelihood(model.likelihood, model))`. With BoTorch 0.18.1 and no explicit `optimizer`/`options`, the dispatch is:
+  - `fit_gpytorch_mll` -> `_fit_fallback` -> default `optimizer=fit_gpytorch_mll_scipy`
+  - `fit_gpytorch_mll_scipy` -> `scipy_minimize` with default `method="L-BFGS-B"` (SciPy quasi-Newton)
+  - `options=None` -> SciPy L-BFGS-B default `maxiter=15000`
+  - Measured on a 30-point GP: ~19 function evaluations, 1 iteration — far below the cap, converging quickly at low parameter dimension.
+- The categorical lengthscale floor (`_CATEGORICAL_LENGTHSCALE_FLOOR = 0.5`) is a repo-specific **constrained-MLE** deviation from the paper: it clamps categorical `lengthscale` at 0.5 lower bound via `GreaterThan(0.5)` + `inverse_transform`, preventing small-sample degeneration where MLE drives lengthscale to 0 and flattens the posterior (exploration freeze). The paper assumes unconstrained MLE.
+
+### 3. Validation
+
+- Optimizer identity check: `fit_gpytorch_mll` default is `fit_gpytorch_mll_scipy` -> `scipy_minimize` `method="L-BFGS-B"`; Adam (`fit_gpytorch_mll_torch`) is only used when explicitly requested, which this codebase does not do.
+- Floor behavior: with few rows the categorical lengthscale is pinned at 0.5; with enough data MLE naturally exceeds 0.5 so the guard is inactive.
+- Ablation evidence (`boagent-bandit-b/floor_ablation.py`): buchwald_sub4, fixed noisy_logei/beta2, 5 seeds x 15 steps, floor 0.5 vs none — t95 4/5 vs 0/5, best mean +1.49.
