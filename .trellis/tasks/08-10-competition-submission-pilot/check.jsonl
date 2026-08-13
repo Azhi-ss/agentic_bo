@@ -1,0 +1,3 @@
+{"file": ".trellis/tasks/08-10-competition-submission-pilot/research/competition-readiness-research.md", "reason": "Contract facts the packager gate must certify: 20 files, exactly 40 steps, unique query_index, exact condition vs test_features.csv, no hidden-label leakage"}
+{"file": ".trellis/tasks/08-10-competition-submission-pilot/research/competition-runner-readiness.md", "reason": "Readiness blockers the gate must not reintroduce: early-stop acceptance, benchmark.compare 2-step/5-seed gate, missing seed_<N>.pt packaging"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Standards to verify against during check: forbidden patterns, quality gate for the new packager/test"}

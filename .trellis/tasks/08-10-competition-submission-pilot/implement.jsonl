@@ -1,0 +1,4 @@
+{"file": ".trellis/tasks/08-10-competition-submission-pilot/research/competition-runner-readiness.md", "reason": "Runner/packaging readiness audit: P0/P1 blockers, packager design, resume + leakage contracts, exact anchors for the fix"}
+{"file": ".trellis/tasks/08-10-competition-submission-pilot/research/competition-readiness-research.md", "reason": "Dataset contract audit: seeds/budget/40-step/query_index/condition/Buchwald 35-row and no-leakage requirements"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Backend code standards and forbidden patterns the packager/config/test must follow"}
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend guideline entry point: pre-dev checklist + quality-check gate for new module work"}
