@@ -258,14 +258,14 @@ for (let step = context.status.observed; step < manifest.budget; step += 1) {
         // Autonomous policy cautions request correction while attempts remain,
         // then preserve the final validated commitment as an advisory outcome.
         decision = resolveAutonomousPolicyAudit(
-          verifyOptimizationPolicy({ commitment: decision, selectedScore, context: policyContext, trajectory, manifest }),
+          verifyOptimizationPolicy({ commitment: decision, selectedScore, context: policyContext, trajectory, manifest, autonomous }),
           attempt,
           maxActionAttempts,
         );
       } else {
         enforcePreferredSuggestion(commitment, context.preferred_suggestion, manifest.budget - context.status.observed);
         const selectedScore = await acquisitionScore(commitment, context, async (config) => requireOk(await lenz("score", "--state", state, "--configs", JSON.stringify([config])), "score"));
-        decision = requirePolicyAllowance(verifyOptimizationPolicy({ commitment, selectedScore, context, trajectory, manifest: context.effective_manifest }));
+        decision = requirePolicyAllowance(verifyOptimizationPolicy({ commitment, selectedScore, context, trajectory, manifest: context.effective_manifest, autonomous }));
       }
       break;
     } catch (error) {

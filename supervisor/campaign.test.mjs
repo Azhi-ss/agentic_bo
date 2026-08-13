@@ -259,6 +259,26 @@ test("autonomous policy recognizes acquisition evidence from pulled proposals", 
   assert.ok(!decision.policy_audit.flags.includes("unsupported_commitment"));
 });
 
+test("explicit autonomous mode accepts free-form evidence for a direct-run manifest", () => {
+  const context = {
+    diagnostics: {},
+    suggestions: [{ pool_index: 7, config: { ligand: "PPh3" }, acquisition_value: 0.9 }],
+  };
+  const commitment = {
+    pool_index: 7,
+    config: { ligand: "PPh3" },
+    decision_goal: "incumbent_improvement",
+    search_mode: "exploit",
+    evidence_sources: ["Receipt 1 and the verified local trend support this candidate."],
+    result_use: "Update the incumbent region ranking.",
+  };
+
+  const decision = verifyOptimizationPolicy({ commitment, selectedScore: 0.9, context, trajectory: [], manifest: { target: "Yield", direction: "maximize", budget: 2 }, autonomous: true });
+
+  assert.ok(!decision.policy_audit.flags.includes("unsupported_commitment"));
+  assert.equal(decision.policy_audit.decision, "allow");
+});
+
 test("autonomous context allows only declared experiment provenance", () => {
   const context = sanitizeAutonomousContext({
     state_revision: 2,
@@ -996,6 +1016,15 @@ test("trajectory replay keeps unscored external decisions visible", () => {
   ]);
 });
 
+test("trajectory replay infers autonomous evidence semantics from manifest provenance", () => {
+  const trajectory = [{ step: 1, decision: { pool_index: 7, config: { ligand: "PPh3" }, evidence_sources: ["Verified local evidence supports this candidate."], decision_goal: "incumbent_improvement", search_mode: "exploit", result_use: "Update the incumbent region ranking." }, metrics: { Yield: 80 } }];
+  const contexts = [{ diagnostics: {}, suggestions: [{ pool_index: 7, config: { ligand: "PPh3" }, acquisition_value: 0.9 }] }];
+  const [audit] = replayOptimizationPolicy(trajectory, contexts, { target: "Yield", direction: "maximize", budget: 2, experiment_policy: "autonomous_agent" });
+
+  assert.equal(audit.decision, "allow");
+  assert.ok(!audit.flags.includes("unsupported_commitment"));
+});
+
 test("stop_campaign returns an explicit terminating campaign action", async () => {
   let action;
   const stop = createCampaignActionTools((value) => { action = value; })
@@ -1241,3 +1270,24 @@ test("unsupported concurrent operations are not retried", async () => {
   }), /not supported/);
   assert.equal(prompts, 1);
 });
+
+test("high-scoring near-best candidate is recognized as shortlisted even if dropped by spatial diversification", () => {
+  const context = {
+    suggestions: [
+      { pool_index: 1, config: { x: 1 }, acquisition_value: 0.90 },
+      { pool_index: 5, config: { x: 5 }, acquisition_value: 0.50 },
+    ],
+  };
+  // Candidate pool_index 2 is not in context.suggestions (e.g. dropped by spatial diversification),
+  // but selectedScore is 0.88 (near-best compared to 0.90).
+  const commitment = { pool_index: 2, config: { x: 2 }, evidence_sources: ["acquisition"] };
+  const decision = verifyOptimizationPolicy({
+    commitment,
+    selectedScore: 0.88,
+    context,
+    trajectory: [],
+    manifest: { target: "Yield", direction: "maximize", budget: 40 },
+  });
+  assert.equal(decision.policy_audit.outside_shortlist, false);
+});
+

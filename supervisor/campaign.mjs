@@ -162,13 +162,14 @@ export const createLenzTools = (lenz, state, onMutation = () => {}, onEvidence =
   const tools = [
     defineTool({
       name: "lenz_suggest", label: "Lenz Suggest", description: "Read the current posterior and propose candidates without committing or updating state. Repeating without a new observation or acquisition/search change adds no evidence.",
-      parameters: Type.Object({ q: Type.Optional(Type.Integer({ minimum: 1, maximum: 20 })), acqf: Type.Optional(Type.String()), beta: Type.Optional(Type.Number({ minimum: 0 })), bounds: Type.Optional(Type.Record(Type.String(), Type.Unknown())), around: Type.Optional(Type.Boolean()), radius: Type.Optional(Type.Number({ exclusiveMinimum: 0, maximum: 1 })) }),
+      parameters: Type.Object({ q: Type.Optional(Type.Integer({ minimum: 1, maximum: 20 })), acqf: Type.Optional(Type.String()), beta: Type.Optional(Type.Number({ minimum: 0 })), bounds: Type.Optional(Type.Record(Type.String(), Type.Unknown())), around: Type.Optional(Type.Boolean()), radius: Type.Optional(Type.Number({ exclusiveMinimum: 0, maximum: 1 })), pure_rank: Type.Optional(Type.Boolean()) }),
       async execute(_id, params) {
         const args = ["suggest", "--state", state, "--q", String(params.q ?? 5)];
         if (params.acqf) args.push("--acqf", params.acqf);
         if (params.beta !== undefined) args.push("--beta", String(params.beta));
         if (params.bounds) args.push("--bounds", JSON.stringify(params.bounds));
         if (params.around) args.push("--around", "--radius", String(params.radius ?? 0.1));
+        if (params.pure_rank) args.push("--pure-rank");
         return tracked("lenz_suggest", await lenz(...args));
       },
     }),
@@ -703,7 +704,7 @@ export const acquisitionScore = async (commitment, context, scoreCandidate) => {
   }
 };
 
-export const verifyOptimizationPolicy = ({ commitment, selectedScore, context, trajectory, manifest }) => {
+export const verifyOptimizationPolicy = ({ commitment, selectedScore, context, trajectory, manifest, autonomous = manifest.experiment_policy === "autonomous_agent" }) => {
   const policy = optimizationPolicy(context, trajectory, manifest);
   const factorRun = sameFactorRunLength(trajectory, commitment.config, manifest.target, manifest.direction);
   const actionRun = sameActionRunLength(trajectory, commitment, manifest.target, manifest.direction);
@@ -716,7 +717,6 @@ export const verifyOptimizationPolicy = ({ commitment, selectedScore, context, t
   // expected_learning, surrogate consistency). The unsupported_commitment /
   // unsupported_override evidence-label checks below are meaningful only for
   // the non-autonomous policy, where evidence_sources is a controlled enum.
-  const autonomous = manifest.experiment_policy === "autonomous_agent";
   // Strict scope-overreach mode counts untested factor levels against the real
   // searchspace level lists or candidate_values count in dataset_summary features.
   const featureLevels = Object.entries(context.dataset_summary?.features ?? {})
@@ -738,10 +738,11 @@ export const verifyOptimizationPolicy = ({ commitment, selectedScore, context, t
   });
   const dissent = gpDissentStreak(trajectory, commitment);
   const suggestions = context.suggestions ?? [];
-  const preferred = context.preferred_suggestion ?? preferredSuggestion(suggestions);
   const shortlistScores = suggestions.map((candidate) => candidate.acquisition_value).filter(Number.isFinite);
   const shortlistBest = shortlistScores.length ? Math.max(...shortlistScores) : null;
-  const isShortlisted = suggestions.some((candidate) => candidate.pool_index === Number(commitment.pool_index));
+  const isHighScoringNearBest = Number.isFinite(selectedScore) && shortlistBest !== null && selectedScore >= (shortlistBest >= 0 ? shortlistBest * 0.90 : shortlistBest * 1.10);
+  const isShortlisted = suggestions.some((candidate) => candidate.pool_index === Number(commitment.pool_index)) || isHighScoringNearBest;
+  const preferred = context.preferred_suggestion ?? preferredSuggestion(suggestions);
   const isPreferred = Number(commitment.pool_index) === Number(preferred?.pool_index)
     && isDeepStrictEqual(commitment.config, preferred?.config);
   const scoreAvailable = Number.isFinite(selectedScore);
