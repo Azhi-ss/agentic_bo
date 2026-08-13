@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import hashlib
+import os
+import threading
 from dataclasses import dataclass
 from typing import Any
 
@@ -11,13 +14,19 @@ from botorch.acquisition.analytic import LogExpectedImprovement
 from botorch.fit import fit_gpytorch_mll
 from botorch.models import MixedSingleTaskGP
 from botorch.models.transforms import Standardize
+from botorch.sampling.normal import SobolQMCNormalSampler
+from botorch.acquisition.utils import prune_inferior_points
+from botorch.models.kernels.categorical import CategoricalKernel
+from botorch.models.transforms.outcome import Standardize as OutcomeStandardize
+from gpytorch.constraints import GreaterThan
 from gpytorch.mlls import ExactMarginalLogLikelihood
 from sklearn.metrics import r2_score
 from sklearn.model_selection import KFold
 
-from .state import Study
+from .state import Study, canonical_json
 
 DTYPE = torch.double
+_TORCH_RNG_LOCK = threading.Lock()
 
 
 @dataclass
@@ -25,7 +34,24 @@ class FittedSurrogate:
     model: MixedSingleTaskGP
     train_x: torch.Tensor
     train_y: torch.Tensor
+    seed: int
 
+
+def local_bo_seed(study: Study, operation: str) -> int:
+    observations = sorted([
+        {"config": {feature: row[feature] for feature in study.features}, "value": float(row[study.target])}
+        for row in study.initial
+    ] + [
+        {"config": trial.config, "value": float((trial.metrics or {})[study.target])}
+        for trial in study.all_observed
+    ], key=canonical_json)
+    material = canonical_json({"campaign_seed": study.seed, "observations": observations, "operation": operation})
+    return int.from_bytes(hashlib.sha256(material.encode()).digest()[:8], "big") % (2**63 - 1)
+
+
+def _derived_seed(seed: int, operation: str) -> int:
+    material = canonical_json({"seed": seed, "operation": operation})
+    return int.from_bytes(hashlib.sha256(material.encode()).digest()[:8], "big") % (2**63 - 1)
 
 def encode_frame(frame: pd.DataFrame, study: Study) -> torch.Tensor:
     columns = []
@@ -38,18 +64,46 @@ def encode_frame(frame: pd.DataFrame, study: Study) -> torch.Tensor:
     return torch.tensor(np.column_stack(columns), dtype=DTYPE)
 
 
-def _fit_surrogate_model(train_x: torch.Tensor, train_y: torch.Tensor) -> MixedSingleTaskGP:
-    model = MixedSingleTaskGP(
-        train_X=train_x,
-        train_Y=train_y,
-        cat_dims=list(range(train_x.shape[1])),
-        outcome_transform=Standardize(m=1),
-    )
-    fit_gpytorch_mll(ExactMarginalLogLikelihood(model.likelihood, model))
-    return model
+def _fit_surrogate_model(train_x: torch.Tensor, train_y: torch.Tensor, seed: int, lengthscale_floor: float | None = None) -> MixedSingleTaskGP:
+    with _TORCH_RNG_LOCK, torch.random.fork_rng():
+        torch.manual_seed(seed)
+        model = MixedSingleTaskGP(
+            train_X=train_x,
+            train_Y=train_y,
+            cat_dims=list(range(train_x.shape[1])),
+            outcome_transform=Standardize(m=1),
+        )
+        if lengthscale_floor is not None:
+            _constrain_categorical_lengthscales(model, lengthscale_floor)
+        fit_gpytorch_mll(ExactMarginalLogLikelihood(model.likelihood, model))
+        return model
 
 
-def fit_surrogate(study: Study, candidates: pd.DataFrame) -> FittedSurrogate:
+# ponytail: lengthscale floor guards against the classic small-sample categorical
+# degeneration (Additive/Base lengthscale -> 0 => kernel treats those dims as
+# noise and flattens their posteriors). With few rows GP can't separate levels,
+# and a floor forces the optimizer to keep some dependence instead of dumping
+# every dimension to "irrelevant". Must set raw_lengthscale_constraint (the
+# registered Param attribute) and re-encode the raw value via inverse_transform,
+# because kernel.lengthscale = X only walks the softplus+lower_bound transform
+# and leaves the underlying raw param free to collapse again during MLE.
+_CATEGORICAL_LENGTHSCALE_FLOOR = 0.5
+
+
+def _constrain_categorical_lengthscales(model: MixedSingleTaskGP, floor: float) -> None:
+    for kernel in model.covar_module.modules():
+        if isinstance(kernel, CategoricalKernel):
+            constraint = GreaterThan(floor)
+            kernel.lengthscale = torch.full_like(kernel.lengthscale, floor)
+            kernel.raw_lengthscale_constraint = constraint
+            kernel.raw_lengthscale.data = constraint.inverse_transform(kernel.lengthscale.detach().clone())
+
+
+def fit_surrogate(study: Study, candidates: pd.DataFrame, operation: str = "local_bo", *, lengthscale_floor: float | None = None) -> FittedSurrogate:
+    if lengthscale_floor is None:
+        env_floor = os.environ.get("BOAGENT_LENGTHSCALE_FLOOR")
+        if env_floor is not None:
+            lengthscale_floor = float(env_floor)
     rows: list[dict[str, Any]] = []
     values: list[float] = []
     sign = 1.0 if study.direction == "maximize" else -1.0
@@ -61,8 +115,9 @@ def fit_surrogate(study: Study, candidates: pd.DataFrame) -> FittedSurrogate:
         values.append(sign * float((trial.metrics or {})[study.target]))
     train_x = encode_frame(pd.DataFrame(rows), study)
     train_y = torch.tensor(values, dtype=DTYPE).unsqueeze(-1)
-    model = _fit_surrogate_model(train_x, train_y)
-    return FittedSurrogate(model=model, train_x=train_x, train_y=train_y)
+    seed = local_bo_seed(study, f"{operation}:fit")
+    model = _fit_surrogate_model(train_x, train_y, seed, lengthscale_floor=lengthscale_floor)
+    return FittedSurrogate(model=model, train_x=train_x, train_y=train_y, seed=local_bo_seed(study, operation))
 
 
 def posterior_rows(fitted: FittedSurrogate, x: torch.Tensor, direction: str) -> tuple[np.ndarray, np.ndarray]:
@@ -81,7 +136,10 @@ def acquisition_values(
     beta: float,
 ) -> np.ndarray:
     if acqf == "noisy_logei":
-        acquisition = qLogNoisyExpectedImprovement(fitted.model, X_baseline=fitted.train_x)
+        prune_sampler = SobolQMCNormalSampler(torch.Size([2048]), seed=_derived_seed(fitted.seed, "noisy_logei:prune"))
+        baseline = prune_inferior_points(fitted.model, fitted.train_x, sampler=prune_sampler)
+        sampler = SobolQMCNormalSampler(torch.Size([512]), seed=_derived_seed(fitted.seed, "noisy_logei:sampler"))
+        acquisition = qLogNoisyExpectedImprovement(fitted.model, X_baseline=baseline, sampler=sampler, prune_baseline=False)
         values = acquisition(x.unsqueeze(1))
     elif acqf == "logei":
         best = fitted.train_y.max()
@@ -94,29 +152,38 @@ def acquisition_values(
         raise ValueError(f"unknown acqf: {acqf}")
     return values.detach().cpu().numpy().reshape(-1)
 
+
 def ranked_candidate_positions(scores: np.ndarray, q: int) -> np.ndarray:
     return np.argsort(-scores, kind="stable")[:q]
 
-def diverse_candidate_positions(scores: np.ndarray, x: torch.Tensor, q: int) -> np.ndarray:
-    if q <= 1:
+def diverse_candidate_positions(scores: np.ndarray, x: torch.Tensor, q: int, pure_rank: bool = False) -> np.ndarray:
+    if pure_rank or q <= 1:
         return ranked_candidate_positions(scores, q)
     chosen = [int(np.argmax(scores))]
     distances = torch.cdist(x, x).cpu().numpy()
+    score_min, score_ptp = float(np.min(scores)), float(np.ptp(scores))
+    norm_scores = (scores - score_min) / score_ptp if score_ptp > 1e-12 else np.zeros_like(scores)
+
     while len(chosen) < min(q, len(scores)):
         remaining = [index for index in range(len(scores)) if index not in chosen]
-        scale = max(float(np.ptp(scores)), 1.0)
-        next_index = max(remaining, key=lambda index: float(scores[index]) + scale * min(distances[index, selected] for selected in chosen))
+        min_dists = np.array([min(distances[index, selected] for selected in chosen) for index in remaining], dtype=float)
+        dist_min, dist_ptp = float(np.min(min_dists)), float(np.ptp(min_dists))
+        norm_dists = (min_dists - dist_min) / dist_ptp if dist_ptp > 1e-12 else np.zeros_like(min_dists)
+
+        best_rem_idx = int(np.argmax(0.8 * norm_scores[remaining] + 0.2 * norm_dists))
+        next_index = remaining[best_rem_idx]
         chosen.append(next_index)
     return np.array(chosen, dtype=int)
 
 
-def _cross_validated_r2(train_x: torch.Tensor, train_y: torch.Tensor) -> tuple[float | None, str]:
+
+def _cross_validated_r2(train_x: torch.Tensor, train_y: torch.Tensor, seed: int) -> tuple[float | None, str]:
     if len(train_y) < 3:
         return None, "insufficient_data"
     predicted = np.empty(len(train_y))
     try:
-        for train_indices, test_indices in KFold(n_splits=min(5, len(train_y))).split(train_x):
-            model = _fit_surrogate_model(train_x[train_indices], train_y[train_indices])
+        for fold, (train_indices, test_indices) in enumerate(KFold(n_splits=min(5, len(train_y))).split(train_x)):
+            model = _fit_surrogate_model(train_x[train_indices], train_y[train_indices], _derived_seed(seed, f"fold:{fold}"))
             with torch.no_grad():
                 predicted[test_indices] = model.posterior(train_x[test_indices]).mean.squeeze(-1).cpu().numpy()
         score = float(r2_score(train_y.squeeze(-1).cpu().numpy(), predicted, force_finite=False))
@@ -165,7 +232,7 @@ def diagnostics(fitted: FittedSurrogate, study: Study) -> dict[str, Any]:
     covar = fitted.model.covar_module
     lengthscale = getattr(covar, "base_kernel", covar).lengthscale.detach().cpu().reshape(-1).tolist()
     noise = float(fitted.model.likelihood.noise.detach().cpu().item())
-    cv_r2, cv_r2_status = _cross_validated_r2(fitted.train_x, fitted.train_y)
+    cv_r2, cv_r2_status = _cross_validated_r2(fitted.train_x, fitted.train_y, local_bo_seed(study, "diagnostics:cross_validation"))
     return {
         "objective": study.target,
         "n_observed": len(actual),
