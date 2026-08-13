@@ -73,3 +73,22 @@ Decoupled runtime autonomous policy mode from manifest inference so live campaig
 ### Status
 
 [OK] **Completed**
+
+
+## Session 4: Acquisition bandit evaluation
+
+**Date**: 2026-08-14
+**Task**: Acquisition bandit evaluation
+**Branch**: `main`
+
+### Summary
+
+Ran three bounded leakage-safe acquisition-bandit iterations on Buchwald_sub4 and Suzuki. Corrected arm/reward attribution, but the final benchmark missed the independent +1% gates; discarded the failed experiment worktree and archived the task.
+
+### Git Commits
+
+(No commits - planning session)
+
+### Status
+
+[OK] **Completed**
