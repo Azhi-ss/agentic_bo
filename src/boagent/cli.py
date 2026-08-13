@@ -220,15 +220,17 @@ def suggest(
     beta: float | None = typer.Option(None),
     bounds: str | None = typer.Option(None),
     around: bool = typer.Option(False),
+    around_spec: str | None = typer.Option(None, "--around-spec"),
     radius: float = typer.Option(0.1),
+    pure_rank: bool = typer.Option(False, "--pure-rank"),
 ) -> None:
     command = "suggest"
     try:
         study = load_state(state)
         candidates = load_candidates(study)
         restrictions = combine_restrictions(candidates, study.active_bounds, parse_json_object(bounds, "bounds") if bounds else {})
-        if around:
-            if not 0 < radius <= 1:
+        if around or around_spec is not None:
+            if around and not 0 < radius <= 1:
                 raise ValueError("radius must be in (0, 1]")
             incumbent_rows = [row for row in observed_records(study) if is_feasible(row, study.constraints)]
             if not incumbent_rows:
@@ -236,13 +238,35 @@ def suggest(
             objective, direction = next(iter(study.objectives.items()))
             best = (max if direction == "maximize" else min)(incumbent_rows, key=lambda row: float(row[objective]))
             local = {}
-            for feature in study.features:
-                domain = study.original_domain[feature]
-                if domain and all(isinstance(value, (int, float)) for value in domain):
-                    width = max(domain) - min(domain)
-                    local[feature] = [max(min(domain), best[feature] - radius * width), min(max(domain), best[feature] + radius * width)]
-                else:
-                    local[feature] = [best[feature]]
+            if around_spec is not None:
+                spec = parse_json_object(around_spec, "around-spec")
+                unknown = set(spec) - set(study.features)
+                if unknown:
+                    raise ValueError(f"unknown around-spec feature: {sorted(unknown)[0]}")
+                for feature in study.features:
+                    entry = spec.get(feature)
+                    if entry is None:
+                        local[feature] = [best[feature]]
+                    elif isinstance(entry, dict) and set(entry) == {"fix"}:
+                        local[feature] = [entry["fix"]]
+                    elif isinstance(entry, list):
+                        local[feature] = entry
+                    elif isinstance(entry, (int, float)) and not isinstance(entry, bool):
+                        domain = study.original_domain[feature]
+                        if not (domain and all(isinstance(value, (int, float)) for value in domain)):
+                            raise ValueError(f"around radius requires a numeric domain for {feature}")
+                        width = max(domain) - min(domain)
+                        local[feature] = [max(min(domain), best[feature] - entry * width), min(max(domain), best[feature] + entry * width)]
+                    else:
+                        raise ValueError(f"invalid around-spec entry for {feature}")
+            else:
+                for feature in study.features:
+                    domain = study.original_domain[feature]
+                    if domain and all(isinstance(value, (int, float)) for value in domain):
+                        width = max(domain) - min(domain)
+                        local[feature] = [max(min(domain), best[feature] - radius * width), min(max(domain), best[feature] + radius * width)]
+                    else:
+                        local[feature] = [best[feature]]
             restrictions = combine_restrictions(candidates, restrictions, local)
         candidates = restrict_candidates(candidates, restrictions)
         available = np.array([index for index in candidates.index if index not in study.submitted], dtype=int)
@@ -260,7 +284,7 @@ def suggest(
             x = encode_frame(candidates.loc[available, study.features], study)
             scores = acquisition_values(fitted, x, name, beta if beta is not None else study.beta)
             mean, variance = posterior_rows(fitted, x, study.direction)
-            order = diverse_candidate_positions(scores, x, q)
+            order = diverse_candidate_positions(scores, x, q, pure_rank=pure_rank)
             result = []
             for position in order:
                 config = config_at(candidates, int(available[position]), study.features)
@@ -269,6 +293,7 @@ def suggest(
     except Exception as exc:
         emit(command, error=str(exc))
         raise typer.Exit(1) from exc
+
 
 
 @app.command()
