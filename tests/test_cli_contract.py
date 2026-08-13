@@ -224,6 +224,43 @@ class LenzCliContractTest(unittest.TestCase):
             self.assertEqual(second.exit_code, 0, second.output)
             self.assertEqual(len(Study.load(state).pending), 2)
 
+    def test_around_spec_omitted_dimensions_pin_at_incumbent(self) -> None:
+        with TemporaryDirectory() as directory:
+            state = create_state(Path(directory))
+            result = runner.invoke(app, ["suggest", "--state", str(state), "--q", "1", "--around-spec", '{"base":["KOH"]}'])
+            self.assertEqual(result.exit_code, 0, result.output)
+            rows = json.loads(result.output)["result"]
+            self.assertEqual(len(rows), 1)
+            # omitted ligand pins at incumbent (PPh3, best Yield 80 in train)
+            self.assertEqual(rows[0]["config"], {"ligand": "PPh3", "base": "KOH"})
+
+    def test_around_spec_fix_pins_a_dimension(self) -> None:
+        with TemporaryDirectory() as directory:
+            state = create_state(Path(directory))
+            result = runner.invoke(app, ["suggest", "--state", str(state), "--q", "1", "--around-spec", '{"ligand":{"fix":"XPhos"}}'])
+            self.assertEqual(result.exit_code, 0, result.output)
+            rows = json.loads(result.output)["result"]
+            self.assertEqual(len(rows), 1)
+            # omitted base pins at incumbent (NaHCO3); ligand fixed to XPhos
+            self.assertEqual(rows[0]["config"], {"ligand": "XPhos", "base": "NaHCO3"})
+
+    def test_around_spec_list_restricts_choice_dimension(self) -> None:
+        with TemporaryDirectory() as directory:
+            state = create_state(Path(directory))
+            result = runner.invoke(app, ["suggest", "--state", str(state), "--q", "1", "--around-spec", '{"ligand":["XPhos"]}'])
+            self.assertEqual(result.exit_code, 0, result.output)
+            rows = json.loads(result.output)["result"]
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]["config"], {"ligand": "XPhos", "base": "NaHCO3"})
+
+    def test_around_spec_rejects_unknown_dimension_and_bad_fix(self) -> None:
+        with TemporaryDirectory() as directory:
+            state = create_state(Path(directory))
+            unknown = runner.invoke(app, ["suggest", "--state", str(state), "--q", "1", "--around-spec", '{"nope":["KOH"]}'])
+            self.assertNotEqual(unknown.exit_code, 0)
+            bad_fix = runner.invoke(app, ["suggest", "--state", str(state), "--q", "1", "--around-spec", '{"ligand":{"both":1}}'])
+            self.assertNotEqual(bad_fix.exit_code, 0)
+
     def test_numeric_bounds_are_intervals_and_temporary_bounds_only_narrow(self) -> None:
         frame = pd.DataFrame({"x": [0, 1, 2, 3, 4, 5]})
         from boagent.cli import combine_restrictions, restrict_candidates

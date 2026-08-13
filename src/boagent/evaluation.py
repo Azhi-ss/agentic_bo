@@ -10,7 +10,29 @@ import torch
 SEEDS = list(range(100, 1001, 100))
 
 
-def validate_trajectory(path: Path, dataset_root: Path, budget: int = 40) -> dict[str, Any]:
+def validate_trajectory_rows(trajectory: list[dict[str, Any]], candidates: pd.DataFrame) -> str | None:
+    """Validate shared trajectory row invariants: step ordering, query_index
+    uniqueness/range, and exact condition match against the candidate pool.
+
+    Returns an error message or None when the rows are valid. Shared by
+    evaluation.validate_trajectory and competition artifact validation.
+    """
+    seen: set[int] = set()
+    for expected_step, row in enumerate(trajectory, 1):
+        if not isinstance(row, dict) or row.get("step") != expected_step:
+            return f"invalid step at {expected_step}"
+        index = row.get("query_index")
+        if isinstance(index, bool) or not isinstance(index, int) or index in seen or index < 0 or index >= len(candidates):
+            return f"invalid query_index: {index}"
+        if row.get("condition") != candidates.loc[index].to_dict():
+            return f"condition mismatch: {index}"
+        seen.add(index)
+    return None
+
+
+def validate_trajectory(path: Path | str, dataset_root: Path | str, budget: int = 40) -> dict[str, Any]:
+    path = Path(path)
+    dataset_root = Path(dataset_root)
     payload = torch.load(path, weights_only=False)
     trajectory = payload["trajectory"] if isinstance(payload, dict) else payload
     stop = payload.get("stop") if isinstance(payload, dict) else None
@@ -19,20 +41,12 @@ def validate_trajectory(path: Path, dataset_root: Path, budget: int = 40) -> dic
         if not valid_stop or not trajectory:
             raise ValueError(f"expected {budget} steps or a verified non-empty early stop, got {len(trajectory)}")
     candidates = pd.read_csv(dataset_root / "test_features.csv")
-    seen: set[int] = set()
     modern = isinstance(payload, dict) and "target" in payload
     target_key = "observed_value" if modern else "observed_yield"
-    values = []
-    for expected_step, row in enumerate(trajectory, 1):
-        index = int(row["query_index"])
-        if row["step"] != expected_step:
-            raise ValueError(f"invalid step at {expected_step}")
-        if index in seen or index < 0 or index >= len(candidates):
-            raise ValueError(f"invalid query_index: {index}")
-        if row["condition"] != candidates.loc[index].to_dict():
-            raise ValueError(f"condition mismatch: {index}")
-        seen.add(index)
-        values.append(float(row[target_key]))
+    row_error = validate_trajectory_rows(trajectory, candidates)
+    if row_error:
+        raise ValueError(row_error)
+    values = [float(row[target_key]) for row in trajectory]
     direction = payload.get("direction", "maximize") if modern else "maximize"
     if direction not in {"maximize", "minimize"}:
         raise ValueError(f"invalid direction: {direction}")

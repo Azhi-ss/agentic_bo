@@ -6,7 +6,7 @@ import { isDeepStrictEqual } from "node:util";
 import { fileURLToPath } from "node:url";
 
 import { createAgentSession, DefaultResourceLoader, getAgentDir, ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
-import { acquisitionScore, autonomousSystemPrompt, campaignResult, createCampaignActionTools, createLenzTools, createRetryPrompt, createStepInstruction, declaredRunProvenance, enforcePreferredSuggestion, leakagePreflight, lowTrustAcquisition, nearBestCandidates, preferredSuggestion, promptWithTransientRetries, reconcileTrajectory, requireCampaignAction, requireOk, requirePolicyAllowance, requireReceipt, resolveAutonomousPolicyAudit, sanitizeAutonomousContext, validateCampaignStatus, validateDecisionEvidence, verifiedTrialFacts, verifyCommitment, verifyOptimizationPolicy, verifyStop } from "./campaign.mjs";
+import { acquisitionScore, autonomousSystemPrompt, campaignResult, createCampaignActionTools, createLenzTools, createRetryPrompt, createStepInstruction, declaredRunProvenance, enforcePreferredSuggestion, leakagePreflight, lowTrustAcquisition, nearBestCandidates, policyAuditSummary, preferredSuggestion, promptWithTransientRetries, reconcileTrajectory, requireCampaignAction, requireOk, requirePolicyAllowance, requireReceipt, resolveAutonomousPolicyAudit, sanitizeAutonomousContext, validateCampaignStatus, validateDecisionEvidence, verifiedTrialFacts, verifyCommitment, verifyOptimizationPolicy, verifyStop } from "./campaign.mjs";
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, "..");
 const argv = process.argv.slice(2);
@@ -275,6 +275,7 @@ for (let step = context.status.observed; step < manifest.budget; step += 1) {
   }
   if (stopped) break;
   const requestId = `${manifest.campaign_id}:${step}:${randomUUID()}`;
+  if (decision.policy_audit) decision.policy_audit = policyAuditSummary(decision.policy_audit);
   const intent = { step: step + 1, request_id: requestId, decision, provenance: "journaled" };
   await persistStep(intent);
   const trialId = await submitDecision(intent);
