@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { acquisitionScore, autonomousSystemPrompt, campaignResult, createCampaignActionTools, createLenzTools, createRetryPrompt, createStepInstruction, crossContextCoverage, declaredRunProvenance, enforcePreferredSuggestion, gpDissentStreak, leakagePreflight, lowTrustAcquisition, nearBestCandidates, optimizationPolicy, preferredSuggestion, promptWithTransientRetries, reconcileTrajectory, replayOptimizationPolicy, requireCampaignAction, requireOk, requirePolicyAllowance, requireReceipt, resolveAutonomousPolicyAudit, sanitizeAutonomousContext, scopeOverreach, validateCampaignStatus, validateDecisionEvidence, verifyCommitment, verifiedTrialFacts, verifyOptimizationPolicy, verifyStop } from "./campaign.mjs";
+import { acquisitionScore, autonomousSystemPrompt, campaignResult, createCampaignActionTools, createLenzTools, createRetryPrompt, createStepInstruction, crossContextCoverage, declaredRunProvenance, enforcePreferredSuggestion, gpDissentStreak, leakagePreflight, lowTrustAcquisition, nearBestCandidates, optimizationPolicy, preferredSuggestion, promptWithTransientRetries, reconcileTrajectory, replayOptimizationPolicy, policyAuditSummary, requireCampaignAction, requireOk, requirePolicyAllowance, requireReceipt, resolveAutonomousPolicyAudit, sanitizeAutonomousContext, scopeOverreach, validateCampaignStatus, validateDecisionEvidence, verifyCommitment, verifiedTrialFacts, verifyOptimizationPolicy, verifyStop } from "./campaign.mjs";
 
 const offered = [{
   candidate_id: "candidate-a",
@@ -417,6 +417,16 @@ test("tool evidence records only successful lenz results", async () => {
   await tools.find((tool) => tool.name === "lenz_predict").execute("id", { configs: [{ ligand: "invalid" }] });
   await tools.find((tool) => tool.name === "lenz_suggest").execute("id", {});
   assert.deepEqual(evidence, ["lenz_suggest"]);
+});
+
+test("lenz_suggest passes around_spec as JSON and prefers it over boolean around", async () => {
+  const calls = [];
+  const tools = createLenzTools(async (...args) => { calls.push(args); return { ok: true, result: [] }; }, "state", () => {}, () => {}, { autonomous: true });
+  const suggest = tools.find((tool) => tool.name === "lenz_suggest");
+  await suggest.execute("id", { q: 2, around_spec: { ligand: ["XPhos"], base: { fix: "NaHCO3" } }, around: true, radius: 0.3 });
+  await suggest.execute("id", { q: 1, around: true });
+  assert.deepEqual(calls[0], ["suggest", "--state", "state", "--q", "2", "--around-spec", JSON.stringify({ ligand: ["XPhos"], base: { fix: "NaHCO3" } })]);
+  assert.deepEqual(calls[1], ["suggest", "--state", "state", "--q", "1", "--around", "--radius", "0.1"]);
 });
 
 test("leakage preflight fails closed on forbidden context or enabled resources", () => {
@@ -1014,6 +1024,70 @@ test("trajectory replay keeps unscored external decisions visible", () => {
   assert.deepEqual(replayOptimizationPolicy(trajectory, contexts, { target: "Yield", direction: "maximize" }), [
     { step: 1, status: "unscored", pool_index: 99 },
   ]);
+});
+
+test("persisted policy audit summary is a stable serializable subset", () => {
+  const audit = {
+    trust: "normal",
+    low_trust_reasons: [],
+    budget: { observed: 3, remaining: 7, stage: "early" },
+    phase: "early_improvement",
+    mode: "enforced",
+    decision: "allow",
+    evidence: { acquisition: true, domain_prior: false, information_goal: false, reconfiguration: false },
+    flags: [],
+    telemetry_flags: [],
+    required_justification: [],
+    acquisition_score: 0.9,
+    acquisition_rank: 1,
+    outside_shortlist: false,
+    factor_run: { feature: "ligand", count: 2, recent_improvements: 1 },
+    action_run: { signature: { intent: "optimize" }, count: 2, recent_improvements: 1 },
+    cross_context: { frozen_factor: "ligand" },
+    scope_overreach: { frozen_factor: "ligand" },
+    gp_dissent: { streak: 0 },
+  };
+  assert.deepEqual(policyAuditSummary(audit), {
+    decision: "allow",
+    flags: [],
+    telemetry_flags: [],
+    required_justification: [],
+    trust: "normal",
+    phase: "early_improvement",
+    budget: { observed: 3, remaining: 7, stage: "early" },
+    acquisition_score: 0.9,
+    acquisition_rank: 1,
+    outside_shortlist: false,
+  });
+});
+
+test("trajectory replay reads a persisted policy audit without contexts", () => {
+  const trajectory = [{ step: 1, decision: { pool_index: 7, config: { ligand: "PPh3" }, policy_audit: { decision: "allow", trust: "normal", phase: "early_improvement", budget: { observed: 0, remaining: 40, stage: "early" }, flags: [], telemetry_flags: [], required_justification: [], acquisition_score: 0.9, acquisition_rank: 1, outside_shortlist: false } }, metrics: { Yield: 80 } }];
+  const [audit] = replayOptimizationPolicy(trajectory, undefined, { target: "Yield", direction: "maximize" });
+
+  assert.equal(audit.step, 1);
+  assert.equal(audit.status, "scored");
+  assert.equal(audit.decision, "allow");
+  assert.equal(audit.acquisition_score, 0.9);
+  assert.equal(audit.budget.stage, "early");
+});
+
+test("trajectory replay prefers a persisted audit over the context fallback", () => {
+  const trajectory = [
+    { step: 1, decision: { pool_index: 7, config: { ligand: "PPh3" }, policy_audit: { decision: "challenge", trust: "low", flags: ["unsupported_override"] } } },
+    { step: 2, decision: { pool_index: 8, config: { ligand: "SPhos" } }, metrics: { Yield: 85 } },
+  ];
+  const contexts = [
+    { diagnostics: {}, suggestions: [{ pool_index: 7, config: { ligand: "PPh3" }, acquisition_value: 0.9 }] },
+    { diagnostics: {}, suggestions: [{ pool_index: 8, config: { ligand: "SPhos" }, acquisition_value: 0.7 }] },
+  ];
+  const results = replayOptimizationPolicy(trajectory, contexts, { target: "Yield", direction: "maximize", budget: 2 });
+
+  assert.equal(results[0].status, "scored");
+  assert.equal(results[0].trust, "low");
+  assert.deepEqual(results[0].flags, ["unsupported_override"]);
+  assert.equal(results[1].status, "scored");
+  assert.equal(results[1].acquisition_score, 0.7);
 });
 
 test("trajectory replay infers autonomous evidence semantics from manifest provenance", () => {
