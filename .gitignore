@@ -13,6 +13,18 @@ state.json
 
 .receipt-key
 supervisor/node_modules/
+trace2zh/
 .pi/
 benchmark/*/
 references/
+周汇报-SARA架构与Seed900分析/
+ai4scompetition/
+
+# Local teaching workspace
+MISSION.md
+NOTES.md
+RESOURCES.md
+assets/
+learning-records/
+lessons/
+reference/

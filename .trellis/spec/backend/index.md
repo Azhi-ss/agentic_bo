@@ -6,7 +6,7 @@
 
 ## Overview
 
-This directory contains guidelines for backend development. Fill in each file with your project's specific conventions.
+This directory contains executable backend contracts grounded in the current implementation. Start with Quality Guidelines for Campaign/config/resume/packaging behavior and Surrogate Architecture for local GP/BoTorch determinism.
 
 ---
 
@@ -16,8 +16,9 @@ This directory contains guidelines for backend development. Fill in each file wi
 |-------|-------------|--------|
 | [Directory Structure](./directory-structure.md) | Module organization and file layout | To fill |
 | [Database Guidelines](./database-guidelines.md) | ORM patterns, queries, migrations | To fill |
-| [Error Handling](./error-handling.md) | Error types, handling strategies | To fill |
-| [Quality Guidelines](./quality-guidelines.md) | Code standards, forbidden patterns | To fill |
+| [Error Handling](./error-handling.md) | Placeholder; scenario-specific failures are currently documented in Quality Guidelines matrices | To fill |
+| [Quality Guidelines](./quality-guidelines.md) | Executable Campaign, config, resume, packaging, and test contracts | Active |
+| [Surrogate Architecture](./surrogate-architecture.md) | Deterministic local GP/BoTorch seed and global RNG isolation contracts | Active |
 | [Logging Guidelines](./logging-guidelines.md) | Structured logging, log levels | To fill |
 
 ---

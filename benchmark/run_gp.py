@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import random
 from pathlib import Path
 
 import numpy as np
@@ -19,6 +20,9 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=100)
     parser.add_argument("--budget", type=int, default=40)
     args = parser.parse_args()
+    random.seed(args.seed)
+    np.random.seed(args.seed)
+    torch.manual_seed(args.seed)
 
     dataset_root = args.dataset_root.resolve()
     output = args.output.resolve()
